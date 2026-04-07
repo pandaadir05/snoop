@@ -1,0 +1,8 @@
+[package]
+name = "snoop-common"
+version = "0.1.0"
+edition = "2021"
+description = "Types shared between snoop userspace and eBPF programs"
+license = "MIT OR Apache-2.0"
+
+[dependencies]

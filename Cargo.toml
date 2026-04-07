@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "snoop",
+    "snoop-common",
+    "snoop-ebpf",
+]
+resolver = "2"
