@@ -1,0 +1,7 @@
+# Stable toolchain for the workspace (userspace crates).
+# The snoop-ebpf crate has its own rust-toolchain.toml pointing to nightly,
+# which is used when building eBPF programs for BPF targets.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]

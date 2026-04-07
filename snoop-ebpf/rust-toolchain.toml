@@ -1,0 +1,8 @@
+# Nightly toolchain for building eBPF programs.
+# Used when running:
+#   cargo +nightly build --target bpfel-unknown-none -Z build-std=core
+# from within this directory (or via xtask).
+[toolchain]
+channel = "nightly"
+components = ["rust-src"]
+targets = ["bpfel-unknown-none", "bpfeb-unknown-none"]
