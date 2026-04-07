@@ -2,8 +2,14 @@
 
 /// Maximum bytes captured for a path or command-name string argument.
 /// Keeping this at 128 keeps the ring-buffer entry size comfortable for the
-/// BPF verifier (total SyscallEvent ≈ 248 bytes).
+/// BPF verifier (total SyscallEvent ≈ 280 bytes).
 pub const PATH_MAX_LEN: usize = 128;
+
+/// Raw bytes of a `struct sockaddr` — enough for IPv4, IPv6, and UNIX.
+/// IPv4 sockaddr_in  = 16 bytes
+/// IPv6 sockaddr_in6 = 28 bytes
+/// UNIX sockaddr_un  = up to 110 bytes (108-byte path + 2 header bytes)
+pub const SOCKADDR_MAX_LEN: usize = 28;
 
 /// Data recorded at syscall entry and stored in the per-tid scratch map
 /// inside the eBPF program.  Not sent to userspace directly.
@@ -68,8 +74,14 @@ pub struct SyscallEvent {
     pub path: [u8; PATH_MAX_LEN],
     /// Number of valid bytes in `path`.  0 means no string was captured.
     pub path_len: u16,
+    /// Raw bytes of the `struct sockaddr` argument for socket syscalls
+    /// (connect, bind, accept, getpeername, getsockname).
+    /// Valid bytes are `sockaddr[0..sockaddr_len]`.
+    pub sockaddr: [u8; SOCKADDR_MAX_LEN],
+    /// Number of valid bytes in `sockaddr`.  0 means no address was captured.
+    pub sockaddr_len: u8,
     /// Reserved / alignment padding.
-    pub _pad: [u8; 6],
+    pub _pad: [u8; 5],
 }
 
 impl SyscallEvent {
@@ -91,5 +103,15 @@ impl SyscallEvent {
         let bytes = &self.path[..end];
         let trimmed = bytes.strip_suffix(b"\0").unwrap_or(bytes);
         core::str::from_utf8(trimmed).ok()
+    }
+
+    /// Returns the raw sockaddr bytes, or an empty slice if none were captured.
+    #[inline]
+    pub fn sockaddr_bytes(&self) -> &[u8] {
+        let len = self.sockaddr_len as usize;
+        if len == 0 || len > SOCKADDR_MAX_LEN {
+            return &[];
+        }
+        &self.sockaddr[..len]
     }
 }

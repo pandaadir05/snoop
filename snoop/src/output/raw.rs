@@ -112,7 +112,9 @@ mod tests {
             comm: *b"nginx\0\0\0\0\0\0\0\0\0\0\0",
             path: [0; 128],
             path_len: 0,
-            _pad: [0; 6],
+            sockaddr: [0; 28],
+            sockaddr_len: 0,
+            _pad: [0; 5],
         };
         let decoded = DecodedEvent::from_event(&event, true);
         let line = out.format_line(&decoded);

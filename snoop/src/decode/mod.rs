@@ -45,8 +45,9 @@ impl DecodedEvent {
         // path_str is the captured first string argument (e.g. the pathname
         // for openat).  It is None when the eBPF program did not capture one.
         let path_str = event.path_str();
+        let sockaddr_bytes = event.sockaddr_bytes();
         let args_str = if decode {
-            decode_args(nr, &event.args, event.ret, path_str)
+            decode_args(nr, &event.args, event.ret, path_str, sockaddr_bytes)
         } else {
             format_raw_args(&event.args)
         };

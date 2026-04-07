@@ -7,7 +7,7 @@ use aya_ebpf::{
     macros::map,
     maps::{Array, HashMap, PerCpuArray, RingBuf},
 };
-use snoop_common::{SyscallEnterData, SyscallEvent, PATH_MAX_LEN};
+use snoop_common::{SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
 
 /// Ring buffer used to forward completed `SyscallEvent`s to userspace.
 ///
@@ -45,6 +45,12 @@ pub(crate) static EXTRA_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024,
 /// consuming the 512-byte BPF stack.  One entry of PATH_MAX_LEN bytes per CPU.
 #[map]
 pub(crate) static PATH_BUF: PerCpuArray<[u8; PATH_MAX_LEN]> =
+    PerCpuArray::with_max_entries(1, 0);
+
+/// Per-CPU scratch buffer used to read sockaddr structs from user memory.
+/// Sized to SOCKADDR_MAX_LEN (28 bytes — enough for IPv6 sockaddr_in6).
+#[map]
+pub(crate) static SOCKADDR_BUF: PerCpuArray<[u8; SOCKADDR_MAX_LEN]> =
     PerCpuArray::with_max_entries(1, 0);
 
 // Compile-time size guard: SyscallEvent must fit in the ring buffer in one shot.

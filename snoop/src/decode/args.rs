@@ -4,21 +4,26 @@
 //! return value, and returns a human-readable argument string.
 //!
 //! The argument values are pointer-sized integers as delivered by the kernel.
-//! For pointer arguments (paths, buffers) we only have the *address* — actual
-//! contents were captured by `bpf_probe_read_user` in the eBPF programs and
-//! are not yet plumbed through.  The address is shown as a hex pointer for
-//! now; string arguments will be added in a follow-up that extends
-//! `SyscallEvent` with an inline string buffer.
+//! Path arguments and sockaddr structs are captured by the eBPF programs via
+//! `bpf_probe_read_user_str` / `bpf_probe_read_user_bytes` and passed in
+//! alongside the raw register values; they fall back to hex addresses when
+//! not available.
 
 use snoop_common::SyscallNr;
 
 /// Format the arguments for a syscall given its number, raw register args,
-/// return value, and an optional captured path string.
+/// return value, an optional captured path string, and optional sockaddr bytes.
 ///
-/// `path` is `Some(&str)` when the eBPF program successfully called
-/// `bpf_probe_read_user_str` for this syscall's first string argument.
-/// When `None`, path arguments fall back to showing the raw pointer address.
-pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64, path: Option<&str>) -> String {
+/// `path` is `Some(&str)` when the eBPF program captured the first string arg.
+/// `sockaddr` is the raw bytes of the `struct sockaddr` argument when captured.
+/// Both fall back to showing the raw pointer address when not available.
+pub fn decode_args(
+    nr: SyscallNr,
+    args: &[u64; 6],
+    ret: i64,
+    path: Option<&str>,
+    sockaddr: &[u8],
+) -> String {
     match nr {
         SyscallNr::READ | SyscallNr::WRITE => fmt_read_write(args),
         SyscallNr::OPEN => fmt_open(args, path),
@@ -35,7 +40,7 @@ pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64, path: Option<&str>)
         SyscallNr::MUNMAP => fmt_munmap(args),
         SyscallNr::BRK => fmt_brk(args),
         SyscallNr::SOCKET => fmt_socket(args),
-        SyscallNr::CONNECT | SyscallNr::BIND => fmt_connect_bind(args),
+        SyscallNr::CONNECT | SyscallNr::BIND => fmt_connect_bind(args, sockaddr),
         SyscallNr::ACCEPT | SyscallNr::ACCEPT4 => fmt_accept(args),
         SyscallNr::SENDTO => fmt_sendto(args),
         SyscallNr::RECVFROM => fmt_recvfrom(args, ret),
@@ -306,8 +311,52 @@ fn fmt_socket(args: &[u64; 6]) -> String {
     format!("{}, {}, {}", socket_domain(args[0]), socket_type(args[1]), args[2])
 }
 
-fn fmt_connect_bind(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", fd(args[0]), ptr(args[1]), args[2])
+fn fmt_connect_bind(args: &[u64; 6], sockaddr: &[u8]) -> String {
+    let addr = format_sockaddr(sockaddr, args[1]);
+    format!("{}, {}, {}", fd(args[0]), addr, args[2])
+}
+
+/// Format a sockaddr struct.  Falls back to a hex pointer when the bytes
+/// are not available or the address family is unknown.
+fn format_sockaddr(bytes: &[u8], fallback_ptr: u64) -> String {
+    if bytes.len() < 2 {
+        return ptr(fallback_ptr);
+    }
+    // sa_family is the first two bytes, little-endian on x86_64/aarch64.
+    let family = u16::from_le_bytes([bytes[0], bytes[1]]);
+    match family {
+        // AF_INET = 2: struct sockaddr_in { u16 family; u16 port; u32 addr; … }
+        2 if bytes.len() >= 8 => {
+            let port = u16::from_be_bytes([bytes[2], bytes[3]]);
+            let a = bytes[4];
+            let b = bytes[5];
+            let c = bytes[6];
+            let d = bytes[7];
+            format!("{a}.{b}.{c}.{d}:{port}")
+        }
+        // AF_INET6 = 10: struct sockaddr_in6 { u16 family; u16 port; u32 flow; u8 addr[16]; … }
+        10 if bytes.len() >= 20 => {
+            let port = u16::from_be_bytes([bytes[2], bytes[3]]);
+            // Format the 16-byte IPv6 address as groups of u16 big-endian.
+            let groups: [u16; 8] = core::array::from_fn(|i| {
+                u16::from_be_bytes([bytes[8 + i * 2], bytes[8 + i * 2 + 1]])
+            });
+            let addr = format!(
+                "{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}",
+                groups[0], groups[1], groups[2], groups[3],
+                groups[4], groups[5], groups[6], groups[7],
+            );
+            format!("[{addr}]:{port}")
+        }
+        // AF_UNIX = 1: struct sockaddr_un { u16 family; char path[108]; }
+        1 if bytes.len() >= 3 => {
+            let path_bytes = &bytes[2..];
+            let end = path_bytes.iter().position(|&b| b == 0).unwrap_or(path_bytes.len());
+            let path = core::str::from_utf8(&path_bytes[..end]).unwrap_or("?");
+            format!("\"{}\"", path)
+        }
+        _ => ptr(fallback_ptr),
+    }
 }
 
 fn fmt_accept(args: &[u64; 6]) -> String {
@@ -626,3 +675,91 @@ fn fmt_prlimit(args: &[u64; 6]) -> String {
     format!("{}, {resource}, {}, {}", args[0] as i32, ptr(args[2]), ptr(args[3]))
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sockaddr_ipv4_localhost_80() {
+        // AF_INET=2, port=80 (0x0050 big-endian), addr=127.0.0.1
+        let bytes: [u8; 8] = [
+            0x02, 0x00, // AF_INET, little-endian
+            0x00, 0x50, // port 80, big-endian
+            127, 0, 0, 1, // 127.0.0.1
+        ];
+        assert_eq!(format_sockaddr(&bytes, 0), "127.0.0.1:80");
+    }
+
+    #[test]
+    fn sockaddr_ipv4_any_443() {
+        let bytes: [u8; 8] = [
+            0x02, 0x00,
+            0x01, 0xBB, // port 443
+            0, 0, 0, 0, // 0.0.0.0
+        ];
+        assert_eq!(format_sockaddr(&bytes, 0), "0.0.0.0:443");
+    }
+
+    #[test]
+    fn sockaddr_unix_path() {
+        let mut bytes = vec![0x01, 0x00]; // AF_UNIX
+        bytes.extend_from_slice(b"/var/run/docker.sock\0");
+        assert_eq!(format_sockaddr(&bytes, 0), "\"/var/run/docker.sock\"");
+    }
+
+    #[test]
+    fn sockaddr_empty_falls_back_to_ptr() {
+        assert_eq!(format_sockaddr(&[], 0x7fff1234), "0x7fff1234");
+    }
+
+    #[test]
+    fn sockaddr_unknown_family_falls_back_to_ptr() {
+        let bytes = [0xFF, 0xFF, 0x00, 0x50]; // AF_MAX or unknown
+        assert_eq!(format_sockaddr(&bytes, 0xdeadbeef), "0xdeadbeef");
+    }
+
+    #[test]
+    fn open_flags_rdonly() {
+        assert_eq!(open_flags(0), "O_RDONLY");
+    }
+
+    #[test]
+    fn open_flags_creat_rdwr() {
+        // O_RDWR | O_CREAT | O_TRUNC
+        assert_eq!(open_flags(0o1102), "O_RDWR|O_CREAT|O_TRUNC");
+    }
+
+    #[test]
+    fn lseek_whence_symbolic() {
+        let mut args = [0u64; 6];
+        args[0] = 3; // fd
+        args[1] = 0; // offset
+        args[2] = 2; // SEEK_END
+        assert_eq!(fmt_lseek(&args), "3, 0, SEEK_END");
+    }
+
+    #[test]
+    fn mmap_prot_flags() {
+        assert_eq!(prot_flags(3), "PROT_READ|PROT_WRITE");
+        assert_eq!(prot_flags(0), "PROT_NONE");
+        assert_eq!(prot_flags(4), "PROT_EXEC");
+    }
+
+    #[test]
+    fn socket_domain_and_type() {
+        assert_eq!(socket_domain(2), "AF_INET");
+        assert_eq!(socket_type(1), "SOCK_STREAM");
+        // SOCK_STREAM=1, SOCK_CLOEXEC=0o2000000=0x80000
+        assert_eq!(socket_type(0x80001), "SOCK_STREAM|SOCK_CLOEXEC");
+    }
+
+    #[test]
+    fn futex_op_names() {
+        assert_eq!(futex_op(0), "FUTEX_WAIT");
+        assert_eq!(futex_op(1), "FUTEX_WAKE");
+        // FUTEX_WAIT_PRIVATE = FUTEX_WAIT | FUTEX_PRIVATE_FLAG (0x80)
+        // The match masks with 0x7f so 128 → 0 → FUTEX_WAIT
+        assert_eq!(futex_op(128), "FUTEX_WAIT");
+    }
+}
