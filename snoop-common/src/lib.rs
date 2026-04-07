@@ -9,5 +9,5 @@
 mod event;
 mod syscall_nr;
 
-pub use event::{SyscallEnterData, SyscallEvent};
+pub use event::{SyscallEnterData, SyscallEvent, PATH_MAX_LEN};
 pub use syscall_nr::SyscallNr;

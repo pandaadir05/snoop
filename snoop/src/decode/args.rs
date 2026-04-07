@@ -13,19 +13,23 @@
 use snoop_common::SyscallNr;
 
 /// Format the arguments for a syscall given its number, raw register args,
-/// and return value.
-pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64) -> String {
+/// return value, and an optional captured path string.
+///
+/// `path` is `Some(&str)` when the eBPF program successfully called
+/// `bpf_probe_read_user_str` for this syscall's first string argument.
+/// When `None`, path arguments fall back to showing the raw pointer address.
+pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64, path: Option<&str>) -> String {
     match nr {
         SyscallNr::READ | SyscallNr::WRITE => fmt_read_write(args),
-        SyscallNr::OPEN => fmt_open(args),
-        SyscallNr::OPENAT => fmt_openat(args),
+        SyscallNr::OPEN => fmt_open(args, path),
+        SyscallNr::OPENAT => fmt_openat(args, path),
         SyscallNr::CLOSE => fmt_close(args),
         SyscallNr::PREAD64 | SyscallNr::PWRITE64 => fmt_pread_pwrite(args),
         SyscallNr::LSEEK => fmt_lseek(args),
-        SyscallNr::STAT | SyscallNr::LSTAT => fmt_stat(args),
+        SyscallNr::STAT | SyscallNr::LSTAT => fmt_stat(args, path),
         SyscallNr::FSTAT => fmt_fstat(args),
-        SyscallNr::FSTATAT => fmt_fstatat(args),
-        SyscallNr::STATX => fmt_statx(args),
+        SyscallNr::FSTATAT => fmt_fstatat(args, path),
+        SyscallNr::STATX => fmt_statx(args, path),
         SyscallNr::MMAP => fmt_mmap(args),
         SyscallNr::MPROTECT => fmt_mprotect(args),
         SyscallNr::MUNMAP => fmt_munmap(args),
@@ -40,8 +44,8 @@ pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64) -> String {
         SyscallNr::SETSOCKOPT | SyscallNr::GETSOCKOPT => fmt_sockopt(args),
         SyscallNr::CLONE => fmt_clone(args),
         SyscallNr::CLONE3 => fmt_clone3(args),
-        SyscallNr::EXECVE => fmt_execve(args),
-        SyscallNr::EXECVEAT => fmt_execveat(args),
+        SyscallNr::EXECVE => fmt_execve(args, path),
+        SyscallNr::EXECVEAT => fmt_execveat(args, path),
         SyscallNr::EXIT | SyscallNr::EXIT_GROUP => fmt_exit(args),
         SyscallNr::WAIT4 => fmt_wait4(args),
         SyscallNr::WAITID => fmt_waitid(args),
@@ -52,10 +56,10 @@ pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64) -> String {
         SyscallNr::PIPE | SyscallNr::PIPE2 => fmt_pipe(args),
         SyscallNr::FUTEX => fmt_futex(args),
         SyscallNr::GETCWD => fmt_getcwd(args),
-        SyscallNr::CHDIR | SyscallNr::FCHDIR => fmt_chdir(args),
-        SyscallNr::MKDIR | SyscallNr::MKDIRAT => fmt_mkdir(args),
-        SyscallNr::UNLINK | SyscallNr::UNLINKAT => fmt_unlink(args),
-        SyscallNr::RENAME | SyscallNr::RENAMEAT => fmt_rename(args),
+        SyscallNr::CHDIR | SyscallNr::FCHDIR => fmt_chdir(args, path),
+        SyscallNr::MKDIR | SyscallNr::MKDIRAT => fmt_mkdir(args, path),
+        SyscallNr::UNLINK | SyscallNr::UNLINKAT => fmt_unlink(args, path),
+        SyscallNr::RENAME | SyscallNr::RENAMEAT => fmt_rename(args, path),
         SyscallNr::IOCTL => fmt_ioctl(args),
         SyscallNr::FALLOCATE => fmt_fallocate(args),
         SyscallNr::GETRANDOM => fmt_getrandom(args),
@@ -74,6 +78,15 @@ fn ptr(addr: u64) -> String {
         "NULL".to_owned()
     } else {
         format!("{addr:#x}")
+    }
+}
+
+/// Format a pointer argument: show the captured string if available, fall
+/// back to the hex address otherwise.
+fn path_or_ptr(addr: u64, path: Option<&str>) -> String {
+    match path {
+        Some(s) => format!("\"{}\"", s.escape_default()),
+        None => ptr(addr),
     }
 }
 
@@ -190,12 +203,12 @@ fn fmt_read_write(args: &[u64; 6]) -> String {
     format!("{}, {}, {}", fd(args[0]), ptr(args[1]), args[2])
 }
 
-fn fmt_open(args: &[u64; 6]) -> String {
-    format!("{}, {}", ptr(args[0]), open_flags(args[1]))
+fn fmt_open(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {}", path_or_ptr(args[0], path), open_flags(args[1]))
 }
 
-fn fmt_openat(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", at_fd(args[0]), ptr(args[1]), open_flags(args[2]))
+fn fmt_openat(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {}, {}", at_fd(args[0]), path_or_ptr(args[1], path), open_flags(args[2]))
 }
 
 fn fmt_close(args: &[u64; 6]) -> String {
@@ -216,20 +229,27 @@ fn fmt_lseek(args: &[u64; 6]) -> String {
     format!("{}, {}, {whence}", fd(args[0]), args[1] as i64)
 }
 
-fn fmt_stat(args: &[u64; 6]) -> String {
-    format!("{}, {}", ptr(args[0]), ptr(args[1]))
+fn fmt_stat(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {}", path_or_ptr(args[0], path), ptr(args[1]))
 }
 
 fn fmt_fstat(args: &[u64; 6]) -> String {
     format!("{}, {}", fd(args[0]), ptr(args[1]))
 }
 
-fn fmt_fstatat(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", at_fd(args[0]), ptr(args[1]), ptr(args[2]))
+fn fmt_fstatat(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {}, {}", at_fd(args[0]), path_or_ptr(args[1], path), ptr(args[2]))
 }
 
-fn fmt_statx(args: &[u64; 6]) -> String {
-    format!("{}, {}, {:#x}, {:#x}, {}", at_fd(args[0]), ptr(args[1]), args[2], args[3], ptr(args[4]))
+fn fmt_statx(args: &[u64; 6], path: Option<&str>) -> String {
+    format!(
+        "{}, {}, {:#x}, {:#x}, {}",
+        at_fd(args[0]),
+        path_or_ptr(args[1], path),
+        args[2],
+        args[3],
+        ptr(args[4]),
+    )
 }
 
 fn fmt_mmap(args: &[u64; 6]) -> String {
@@ -311,12 +331,19 @@ fn fmt_clone3(args: &[u64; 6]) -> String {
     format!("{}, {}", ptr(args[0]), args[1])
 }
 
-fn fmt_execve(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", ptr(args[0]), ptr(args[1]), ptr(args[2]))
+fn fmt_execve(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {}, {}", path_or_ptr(args[0], path), ptr(args[1]), ptr(args[2]))
 }
 
-fn fmt_execveat(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {}, {:#x}", at_fd(args[0]), ptr(args[1]), ptr(args[2]), ptr(args[3]), args[4])
+fn fmt_execveat(args: &[u64; 6], path: Option<&str>) -> String {
+    format!(
+        "{}, {}, {}, {}, {:#x}",
+        at_fd(args[0]),
+        path_or_ptr(args[1], path),
+        ptr(args[2]),
+        ptr(args[3]),
+        args[4],
+    )
 }
 
 fn fmt_exit(args: &[u64; 6]) -> String {
@@ -382,20 +409,21 @@ fn fmt_getcwd(args: &[u64; 6]) -> String {
     format!("{}, {}", ptr(args[0]), args[1])
 }
 
-fn fmt_chdir(args: &[u64; 6]) -> String {
-    ptr(args[0])
+fn fmt_chdir(args: &[u64; 6], path: Option<&str>) -> String {
+    path_or_ptr(args[0], path)
 }
 
-fn fmt_mkdir(args: &[u64; 6]) -> String {
-    format!("{}, {:#o}", ptr(args[0]), args[1])
+fn fmt_mkdir(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {:#o}", path_or_ptr(args[0], path), args[1])
 }
 
-fn fmt_unlink(args: &[u64; 6]) -> String {
-    ptr(args[0])
+fn fmt_unlink(args: &[u64; 6], path: Option<&str>) -> String {
+    path_or_ptr(args[0], path)
 }
 
-fn fmt_rename(args: &[u64; 6]) -> String {
-    format!("{}, {}", ptr(args[0]), ptr(args[1]))
+fn fmt_rename(args: &[u64; 6], path: Option<&str>) -> String {
+    // path captures the first argument; the second is always a hex pointer
+    format!("{}, {}", path_or_ptr(args[0], path), ptr(args[1]))
 }
 
 fn fmt_ioctl(args: &[u64; 6]) -> String {

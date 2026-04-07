@@ -138,6 +138,9 @@ mod tests {
             enter_ns: 1000,
             exit_ns: 1000 + duration_ns,
             comm: [0; 16],
+            path: [0; 128],
+            path_len: 0,
+            _pad: [0; 6],
         }
     }
 

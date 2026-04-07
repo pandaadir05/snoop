@@ -110,6 +110,9 @@ mod tests {
             enter_ns: 1_000_000_000,
             exit_ns: 1_000_043_000,
             comm: *b"nginx\0\0\0\0\0\0\0\0\0\0\0",
+            path: [0; 128],
+            path_len: 0,
+            _pad: [0; 6],
         };
         let decoded = DecodedEvent::from_event(&event, true);
         let line = out.format_line(&decoded);

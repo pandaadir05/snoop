@@ -42,8 +42,11 @@ impl DecodedEvent {
     pub fn from_event(event: &SyscallEvent, decode: bool) -> Self {
         let nr = SyscallNr(event.syscall_nr);
         let name = syscall_name(nr);
+        // path_str is the captured first string argument (e.g. the pathname
+        // for openat).  It is None when the eBPF program did not capture one.
+        let path_str = event.path_str();
         let args_str = if decode {
-            decode_args(nr, &event.args, event.ret)
+            decode_args(nr, &event.args, event.ret, path_str)
         } else {
             format_raw_args(&event.args)
         };
