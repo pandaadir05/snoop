@@ -11,3 +11,27 @@ path = "src/main.rs"
 
 [dependencies]
 snoop-common = { path = "../snoop-common" }
+
+anyhow      = "1"
+clap        = { version = "4", features = ["derive", "env"] }
+log         = "0.4"
+env_logger  = "0.11"
+libc        = "0.2"
+tokio       = { version = "1", features = ["full"] }
+thiserror   = "2"
+
+# TUI
+ratatui   = "0.30"
+crossterm = "0.29"
+
+# aya and friends are Linux-only.  On macOS the crate still compiles for
+# IDE support; the Linux-gated modules are simply excluded.
+[target.'cfg(target_os = "linux")'.dependencies]
+aya     = { version = "0.13", features = ["async_tokio"] }
+aya-log = "0.2"
+
+[build-dependencies]
+# aya-build runs a sub-cargo that compiles snoop-ebpf for bpfel-unknown-none.
+# It is only invoked when building on Linux; on other hosts the build script
+# is a no-op.  See build.rs.
+aya-build = "0.1"
