@@ -128,6 +128,56 @@
 
 ---
 
+## 2026-04-08 — "Make it the best" session
+
+**What changed:**
+
+*README overhaul*
+- Complete rewrite: ASCII demo output, feature matrix, install instructions,
+  all CLI flags, TUI keybindings table, architecture diagram, contributing guide.
+
+*Release workflow*
+- `.github/workflows/release.yml`: builds static musl binaries for x86_64 and
+  aarch64 on `v*` tags, publishes to GitHub Releases with SHA-256 checksums.
+  Uses `bpf-linker` + `cargo xtask build-ebpf` for the eBPF compile step.
+
+*sockaddr capture (connect/bind show IP:port)*
+- `SyscallEvent` gains `sockaddr: [u8; 28]` + `sockaddr_len: u8` fields.
+- `sys_exit` reads the sockaddr pointer via `bpf_probe_read_user_bytes` into a
+  `SOCKADDR_BUF: PerCpuArray` scratch buffer, copies into ring buffer event.
+- `format_sockaddr()` decodes AF_INET→`127.0.0.1:8080`, AF_INET6→`[::1]:443`,
+  AF_UNIX→`"/var/run/docker.sock"`, unknown→hex pointer.
+- 11 new unit tests for sockaddr decode and common flag formatters.
+
+*JSON Lines output (--json)*
+- `OutputMode::Json` added; `JsonOutput` writes one compact JSON object per
+  syscall (ts_ns, pid, tid, uid, gid, comm, syscall, args, ret, duration_ns).
+  Manual serialisation — no serde dependency.  3 unit tests.
+
+*Record & replay (snoop record / snoop view)*
+- Binary `.snoop` format: 16-byte header (magic + version) + length-prefixed
+  `SyscallEvent` frames.  Version field guards against struct layout changes.
+- `TraceWriter` / `TraceReader` with round-trip and bad-magic tests.
+- `snoop record -p PID -o trace.snoop` and spawn mode.
+- `snoop view trace.snoop [filters]` — no root needed, all output modes work
+  including TUI (events replayed over mpsc channel).
+- CLI restructured to use clap `Subcommand` for `record` and `view`; default
+  (no subcommand) preserves the existing `snoop -p PID` / `snoop <cmd>` syntax.
+
+**Decisions:**
+- sockaddr capped at 28 bytes (IPv6 sockaddr_in6 size); enough for all common
+  address families without bloating SyscallEvent further.
+- JSON serialised manually to avoid pulling serde into a binary that has no
+  other use for it; the format is simple enough.
+- Trace file uses raw SyscallEvent bytes (no compression); acceptable for
+  analysis traces — 1 M events ≈ 280 MiB.  Compression is a v0.3 item.
+- `snoop view` in TUI mode feeds events through an mpsc channel so TuiApp is
+  reused unchanged; a `done` signal fires immediately after all events are queued.
+
+**State:** `cargo build` ✓  `cargo test` ✓  (26 tests pass, 0 warnings)
+
+---
+
 ## 2026-04-08 — Follow mode and complete syscall decoder coverage
 
 **What changed:**

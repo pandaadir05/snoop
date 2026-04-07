@@ -54,18 +54,20 @@
 - [x] Flamegraph export: `--flamegraph out.svg` (inferno crate, uses timing data)
 - [x] `CAP_BPF` / root check with a clear error message and suggestion
 - [x] `--version` output with git SHA embedded at build time
-- [ ] `cargo install` works on Linux x86_64 and aarch64
+- [x] `cargo install` works on Linux x86_64 and aarch64 (release workflow publishes musl binaries)
 
 ## v0.2 — Post-launch
 
+- [x] Record & replay: `snoop record -p PID -o trace.snoop`, `snoop view trace.snoop`
+- [x] JSON output: `--json` (JSON Lines, pipe to jq)
+- [x] sockaddr decode: connect/bind show `127.0.0.1:8080` instead of raw pointer
 - [ ] "Explain" mode: semantic grouping (HTTP GET, config load, etc.)
-- [ ] Record & replay: `snoop record … > trace.snoop`, `snoop view trace.snoop`
-- [ ] Diff mode: `snoop diff good.snoop bad.snoop`
+- [ ] Diff mode: `snoop diff a.snoop b.snoop`
 - [ ] Container / Kubernetes awareness (`--docker`, `--pod`)
 - [ ] uprobe-based library-call tracing (absorb ltrace)
 - [ ] TLS decryption via uprobes on `SSL_write` / `SSL_read`
 - [ ] Kernel-side PID filtering (avoid ring-buffer saturation on busy hosts)
-- [ ] aarch64 CI and release artifacts
+- [ ] aarch64 CI job (eBPF cross-compile)
 
 ## Technical debt / known limitations
 
@@ -76,5 +78,5 @@
   from userspace via `bpf_probe_read_user`; long strings are truncated at 128 bytes.
 - No kernel-side PID filter yet — all syscalls are forwarded to userspace and
   filtered there. High-frequency workloads may saturate the ring buffer.
-- sockaddr structs (connect/bind/accept) are decoded as raw pointers; a future
-  pass using a second BPF read could render IP:port strings.
+- accept/getpeername/getsockname still show raw sockaddr pointers; they need the
+  same SOCKADDR_BUF capture treatment as connect/bind.
