@@ -31,7 +31,10 @@ static SNOOP_EBPF_BYTES: &[u8] =
 ///
 /// Sets `TARGET_PID[0] = pid_filter` before attaching so the eBPF programs
 /// only forward events for the target process.  Pass `0` to trace all PIDs.
-pub fn load(pid_filter: u32, ebpf_obj: Option<PathBuf>) -> Result<Ebpf> {
+///
+/// When `follow` is `true`, sets `FOLLOW_MODE[0] = 1` so that fork/clone
+/// child PIDs are automatically added to `EXTRA_PIDS` at runtime.
+pub fn load(pid_filter: u32, follow: bool, ebpf_obj: Option<PathBuf>) -> Result<Ebpf> {
     let mut ebpf = match ebpf_obj {
         Some(ref path) => {
             let bytes = std::fs::read(path)
@@ -49,6 +52,15 @@ pub fn load(pid_filter: u32, ebpf_obj: Option<PathBuf>) -> Result<Ebpf> {
                 .context("TARGET_PID map not found in eBPF object")?,
         )?;
         target.set(0, pid_filter, 0)?;
+    }
+
+    // Enable follow mode (child-process tracking via fork/clone).
+    if follow {
+        let mut follow_map: Array<_, u8> = Array::try_from(
+            ebpf.map_mut("FOLLOW_MODE")
+                .context("FOLLOW_MODE map not found in eBPF object")?,
+        )?;
+        follow_map.set(0, 1u8, 0)?;
     }
 
     // Attach sys_enter.

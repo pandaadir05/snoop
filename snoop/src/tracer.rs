@@ -19,6 +19,9 @@ use crate::{
 };
 
 /// Spawn a new process and trace it.
+///
+/// Always enables follow mode so any children spawned by the target are
+/// also traced; the user opted in by choosing spawn mode.
 pub async fn spawn(
     cmd: &[String],
     filter: Filter,
@@ -49,7 +52,9 @@ pub async fn spawn(
         .id()
         .context("child process has already exited")?;
 
-    let ebpf = loader::load(pid, ebpf_obj)?;
+    // Always follow children when spawning — the user chose to trace this
+    // command so tracing its children is the expected behaviour.
+    let ebpf = loader::load(pid, true, ebpf_obj)?;
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
@@ -70,7 +75,7 @@ pub async fn spawn(
 /// Attach to an existing process by PID.
 pub async fn attach(
     pid: u32,
-    _follow: bool,
+    follow: bool,
     filter: Filter,
     mode: OutputMode,
     flamegraph: Option<PathBuf>,
@@ -81,7 +86,7 @@ pub async fn attach(
         bail!("process {pid} does not exist");
     }
 
-    let ebpf = loader::load(pid, ebpf_obj)?;
+    let ebpf = loader::load(pid, follow, ebpf_obj)?;
     let (tx, rx) = mpsc::channel(4096);
     let (_done_tx, done_rx) = watch::channel(false);
 

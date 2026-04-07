@@ -19,7 +19,7 @@ use aya_ebpf::{
 };
 use snoop_common::{SyscallEnterData, SyscallEvent, PATH_MAX_LEN};
 
-use crate::maps::{EVENTS, PATH_BUF, SYSCALL_ENTER};
+use crate::maps::{EVENTS, EXTRA_PIDS, FOLLOW_MODE, PATH_BUF, SYSCALL_ENTER};
 
 /// Tracepoint attached to `raw_syscalls/sys_exit`.
 ///
@@ -90,7 +90,43 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
     }
 
     rb_entry.submit(0);
+
+    // If follow mode is active and this was a fork/clone that succeeded in
+    // the parent (ret > 0), add the child PID to EXTRA_PIDS so it is traced.
+    maybe_follow_child(enter.syscall_nr, ret);
+
     Ok(())
+}
+
+/// When `--follow` is active, insert the child PID returned by fork/clone
+/// into `EXTRA_PIDS` so subsequent syscalls from that process are captured.
+#[inline(always)]
+fn maybe_follow_child(syscall_nr: i64, ret: i64) {
+    // Only act if follow mode is enabled.
+    let follow = match unsafe { FOLLOW_MODE.get(0) } {
+        Some(f) => *f,
+        None => return,
+    };
+    if follow == 0 {
+        return;
+    }
+
+    // Only fork/clone syscalls return a child PID.
+    // fork=57, vfork=58, clone=56, clone3=435
+    match syscall_nr {
+        56 | 57 | 58 | 435 => {}
+        _ => return,
+    }
+
+    // ret > 0 in the parent means this is the parent side of the fork and
+    // ret is the child PID.  ret == 0 is the child; ret < 0 is an error.
+    if ret <= 0 {
+        return;
+    }
+
+    let child_pid = ret as u32;
+    // Best-effort insert; ignore errors (map full, etc.).
+    let _ = unsafe { EXTRA_PIDS.insert(&child_pid, &1u8, 0) };
 }
 
 /// Determine the path argument for this syscall and read it from user memory

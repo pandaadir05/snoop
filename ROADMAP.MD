@@ -7,7 +7,7 @@
 - [x] Ring-buffer event path from eBPF to userspace
 - [x] Spawn mode: `snoop <cmd> [args…]` — fork/exec target, trace from birth
 - [x] Attach mode: `snoop -p <pid>` — attach to running process
-- [ ] Follow mode: `snoop -p <pid> --follow` — trace process tree (intercept clone/fork)
+- [x] Follow mode: `snoop -p <pid> --follow` — trace process tree (intercept clone/fork)
 - [x] Graceful exit on target process termination
 
 ### Argument decoding (top 40 syscalls)
@@ -66,7 +66,6 @@
 - [ ] TLS decryption via uprobes on `SSL_write` / `SSL_read`
 - [ ] Kernel-side PID filtering (avoid ring-buffer saturation on busy hosts)
 - [ ] aarch64 CI and release artifacts
-- [ ] Follow mode: trace process tree via clone/fork interception
 
 ## Technical debt / known limitations
 

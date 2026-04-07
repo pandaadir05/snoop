@@ -19,7 +19,7 @@ use aya_ebpf::{
 };
 use snoop_common::SyscallEnterData;
 
-use crate::maps::{SYSCALL_ENTER, TARGET_PID};
+use crate::maps::{EXTRA_PIDS, SYSCALL_ENTER, TARGET_PID};
 
 /// Tracepoint attached to `raw_syscalls/sys_enter`.
 ///
@@ -40,10 +40,15 @@ fn try_sys_enter(ctx: &TracePointContext) -> Result<(), i64> {
     let pid = (id >> 32) as u32;
     let tid = id as u32;
 
-    // Apply PID filter (TARGET_PID[0] == 0 → trace everything).
+    // Apply PID filter.  TARGET_PID[0] == 0 means trace all.
+    // Otherwise the process must match TARGET_PID or appear in EXTRA_PIDS
+    // (the latter is populated by sys_exit when --follow is active).
     if let Some(&target) = unsafe { TARGET_PID.get(0) } {
         if target != 0 && pid != target {
-            return Ok(());
+            let in_extra = unsafe { EXTRA_PIDS.get(&pid) }.is_some();
+            if !in_extra {
+                return Ok(());
+            }
         }
     }
 
