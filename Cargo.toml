@@ -5,3 +5,9 @@ members = [
     "snoop-ebpf",
 ]
 resolver = "2"
+
+# Release profile optimized for eBPF object size and correctness.
+# LTO + opt-level 3 are important for the BPF verifier passing complex programs.
+[profile.release]
+lto = true
+opt-level = 3

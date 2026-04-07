@@ -12,6 +12,3 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 snoop-common = { path = "../snoop-common" }
 
-[profile.release]
-lto = true
-opt-level = 3
