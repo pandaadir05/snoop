@@ -62,12 +62,12 @@
 - [x] JSON output: `--json` (JSON Lines, pipe to jq)
 - [x] sockaddr decode: connect/bind show `127.0.0.1:8080` instead of raw pointer
 - [ ] "Explain" mode: semantic grouping (HTTP GET, config load, etc.)
-- [ ] Diff mode: `snoop diff a.snoop b.snoop`
+- [x] Diff mode: `snoop diff a.snoop b.snoop`
 - [ ] Container / Kubernetes awareness (`--docker`, `--pod`)
 - [ ] uprobe-based library-call tracing (absorb ltrace)
 - [ ] TLS decryption via uprobes on `SSL_write` / `SSL_read`
-- [ ] Kernel-side PID filtering (avoid ring-buffer saturation on busy hosts)
-- [ ] aarch64 CI job (eBPF cross-compile)
+- [x] Kernel-side PID filtering — sys_enter drops non-target events before they reach the ring buffer
+- [x] aarch64 CI job (cross-compile check + eBPF bpf{el,eb}-unknown-none jobs)
 
 ## Technical debt / known limitations
 
@@ -78,5 +78,4 @@
   from userspace via `bpf_probe_read_user`; long strings are truncated at 128 bytes.
 - No kernel-side PID filter yet — all syscalls are forwarded to userspace and
   filtered there. High-frequency workloads may saturate the ring buffer.
-- accept/getpeername/getsockname still show raw sockaddr pointers; they need the
-  same SOCKADDR_BUF capture treatment as connect/bind.
+- accept/accept4/getpeername/getsockname now also capture sockaddr via SOCKADDR_BUF.
