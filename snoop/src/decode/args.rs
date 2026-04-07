@@ -39,9 +39,13 @@ pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64, path: Option<&str>)
         SyscallNr::ACCEPT | SyscallNr::ACCEPT4 => fmt_accept(args),
         SyscallNr::SENDTO => fmt_sendto(args),
         SyscallNr::RECVFROM => fmt_recvfrom(args, ret),
+        SyscallNr::SENDMSG | SyscallNr::SENDMMSG => fmt_sendmsg(args),
+        SyscallNr::RECVMSG | SyscallNr::RECVMMSG => fmt_recvmsg(args),
         SyscallNr::LISTEN => fmt_listen(args),
         SyscallNr::GETSOCKNAME | SyscallNr::GETPEERNAME => fmt_getname(args),
         SyscallNr::SETSOCKOPT | SyscallNr::GETSOCKOPT => fmt_sockopt(args),
+        SyscallNr::SOCKETPAIR => fmt_socketpair(args),
+        SyscallNr::FORK | SyscallNr::VFORK => String::new(),
         SyscallNr::CLONE => fmt_clone(args),
         SyscallNr::CLONE3 => fmt_clone3(args),
         SyscallNr::EXECVE => fmt_execve(args, path),
@@ -56,16 +60,38 @@ pub fn decode_args(nr: SyscallNr, args: &[u64; 6], ret: i64, path: Option<&str>)
         SyscallNr::PIPE | SyscallNr::PIPE2 => fmt_pipe(args),
         SyscallNr::FUTEX => fmt_futex(args),
         SyscallNr::GETCWD => fmt_getcwd(args),
-        SyscallNr::CHDIR | SyscallNr::FCHDIR => fmt_chdir(args, path),
+        SyscallNr::CHDIR => fmt_chdir(args, path),
+        SyscallNr::FCHDIR => fd(args[0]),
         SyscallNr::MKDIR | SyscallNr::MKDIRAT => fmt_mkdir(args, path),
         SyscallNr::UNLINK | SyscallNr::UNLINKAT => fmt_unlink(args, path),
         SyscallNr::RENAME | SyscallNr::RENAMEAT => fmt_rename(args, path),
         SyscallNr::IOCTL => fmt_ioctl(args),
         SyscallNr::FALLOCATE => fmt_fallocate(args),
+        SyscallNr::FTRUNCATE => fmt_ftruncate(args),
+        SyscallNr::TRUNCATE => fmt_truncate(args, path),
+        SyscallNr::FSYNC | SyscallNr::FDATASYNC => fd(args[0]),
+        SyscallNr::MADVISE => fmt_madvise(args),
+        SyscallNr::SENDFILE => fmt_sendfile(args),
+        SyscallNr::SPLICE => fmt_splice(args),
+        SyscallNr::MEMFD_CREATE => fmt_memfd_create(args),
+        SyscallNr::GETDENTS64 => fmt_getdents64(args),
+        SyscallNr::GETPID
+        | SyscallNr::GETPPID
+        | SyscallNr::GETTID
+        | SyscallNr::GETUID
+        | SyscallNr::GETEUID
+        | SyscallNr::GETGID
+        | SyscallNr::GETEGID
+        | SyscallNr::SCHED_YIELD => String::new(),
+        SyscallNr::NANOSLEEP => fmt_nanosleep(args),
         SyscallNr::GETRANDOM => fmt_getrandom(args),
         SyscallNr::PRCTL => fmt_prctl(args),
         SyscallNr::EPOLL_CTL => fmt_epoll_ctl(args),
         SyscallNr::EPOLL_WAIT | SyscallNr::EPOLL_PWAIT => fmt_epoll_wait(args),
+        SyscallNr::READV | SyscallNr::WRITEV => fmt_readv(args),
+        SyscallNr::MREMAP => fmt_mremap(args),
+        SyscallNr::MSYNC => fmt_msync(args),
+        SyscallNr::PRLIMIT64 => fmt_prlimit(args),
         // Everything else: raw hex.
         _ => fmt_raw(args),
     }
@@ -475,3 +501,128 @@ fn fmt_epoll_ctl(args: &[u64; 6]) -> String {
 fn fmt_epoll_wait(args: &[u64; 6]) -> String {
     format!("{}, {}, {}, {}", fd(args[0]), ptr(args[1]), args[2], args[3] as i32)
 }
+
+fn fmt_sendmsg(args: &[u64; 6]) -> String {
+    let flags = args[2];
+    format!("{}, {}, {:#x}", fd(args[0]), ptr(args[1]), flags)
+}
+
+fn fmt_recvmsg(args: &[u64; 6]) -> String {
+    let flags = args[2];
+    format!("{}, {}, {:#x}", fd(args[0]), ptr(args[1]), flags)
+}
+
+fn fmt_socketpair(args: &[u64; 6]) -> String {
+    format!("{}, {}, {}, {}", socket_domain(args[0]), socket_type(args[1]), args[2], ptr(args[3]))
+}
+
+fn fmt_ftruncate(args: &[u64; 6]) -> String {
+    format!("{}, {}", fd(args[0]), args[1] as i64)
+}
+
+fn fmt_truncate(args: &[u64; 6], path: Option<&str>) -> String {
+    format!("{}, {}", path_or_ptr(args[0], path), args[1] as i64)
+}
+
+fn fmt_madvise(args: &[u64; 6]) -> String {
+    let advice = match args[2] {
+        0  => "MADV_NORMAL",
+        1  => "MADV_RANDOM",
+        2  => "MADV_SEQUENTIAL",
+        3  => "MADV_WILLNEED",
+        4  => "MADV_DONTNEED",
+        8  => "MADV_FREE",
+        9  => "MADV_REMOVE",
+        10 => "MADV_DONTFORK",
+        11 => "MADV_DOFORK",
+        12 => "MADV_MERGEABLE",
+        13 => "MADV_UNMERGEABLE",
+        14 => "MADV_HUGEPAGE",
+        15 => "MADV_NOHUGEPAGE",
+        16 => "MADV_DONTDUMP",
+        17 => "MADV_DODUMP",
+        _  => "MADV_?",
+    };
+    format!("{}, {}, {advice}", ptr(args[0]), args[1])
+}
+
+fn fmt_sendfile(args: &[u64; 6]) -> String {
+    format!("{}, {}, {}, {}", fd(args[0]), fd(args[1]), ptr(args[2]), args[3])
+}
+
+fn fmt_splice(args: &[u64; 6]) -> String {
+    // splice(fd_in, off_in, fd_out, off_out, len, flags)
+    let flags = args[5];
+    let mut parts: Vec<&str> = Vec::new();
+    if flags & 1 != 0 { parts.push("SPLICE_F_MOVE"); }
+    if flags & 2 != 0 { parts.push("SPLICE_F_NONBLOCK"); }
+    if flags & 4 != 0 { parts.push("SPLICE_F_MORE"); }
+    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    format!(
+        "{}, {}, {}, {}, {}, {flags_str}",
+        fd(args[0]), ptr(args[1]), fd(args[2]), ptr(args[3]), args[4]
+    )
+}
+
+fn fmt_memfd_create(args: &[u64; 6]) -> String {
+    let flags = args[1];
+    let mut parts: Vec<&str> = Vec::new();
+    if flags & 1 != 0 { parts.push("MFD_CLOEXEC"); }
+    if flags & 2 != 0 { parts.push("MFD_ALLOW_SEALING"); }
+    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    format!("{}, {flags_str}", ptr(args[0]))
+}
+
+fn fmt_getdents64(args: &[u64; 6]) -> String {
+    format!("{}, {}, {}", fd(args[0]), ptr(args[1]), args[2])
+}
+
+fn fmt_nanosleep(args: &[u64; 6]) -> String {
+    format!("{}, {}", ptr(args[0]), ptr(args[1]))
+}
+
+fn fmt_readv(args: &[u64; 6]) -> String {
+    format!("{}, {}, {}", fd(args[0]), ptr(args[1]), args[2])
+}
+
+fn fmt_mremap(args: &[u64; 6]) -> String {
+    let flags = args[3];
+    let mut parts: Vec<&str> = Vec::new();
+    if flags & 1 != 0 { parts.push("MREMAP_MAYMOVE"); }
+    if flags & 2 != 0 { parts.push("MREMAP_FIXED"); }
+    let flags_str = if parts.is_empty() { format!("{flags:#x}") } else { parts.join("|") };
+    format!("{}, {}, {}, {flags_str}", ptr(args[0]), args[1], args[2])
+}
+
+fn fmt_msync(args: &[u64; 6]) -> String {
+    let flags = args[2];
+    let mut parts: Vec<&str> = Vec::new();
+    if flags & 1 != 0 { parts.push("MS_ASYNC"); }
+    if flags & 2 != 0 { parts.push("MS_INVALIDATE"); }
+    if flags & 4 != 0 { parts.push("MS_SYNC"); }
+    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    format!("{}, {}, {flags_str}", ptr(args[0]), args[1])
+}
+
+fn fmt_prlimit(args: &[u64; 6]) -> String {
+    let resource = match args[1] {
+        0  => "RLIMIT_CPU",
+        1  => "RLIMIT_FSIZE",
+        2  => "RLIMIT_DATA",
+        3  => "RLIMIT_STACK",
+        4  => "RLIMIT_CORE",
+        5  => "RLIMIT_RSS",
+        6  => "RLIMIT_NPROC",
+        7  => "RLIMIT_NOFILE",
+        8  => "RLIMIT_MEMLOCK",
+        9  => "RLIMIT_AS",
+        10 => "RLIMIT_LOCKS",
+        11 => "RLIMIT_SIGPENDING",
+        12 => "RLIMIT_MSGQUEUE",
+        13 => "RLIMIT_NICE",
+        14 => "RLIMIT_RTPRIO",
+        _  => "RLIMIT_?",
+    };
+    format!("{}, {resource}, {}, {}", args[0] as i32, ptr(args[2]), ptr(args[3]))
+}
+

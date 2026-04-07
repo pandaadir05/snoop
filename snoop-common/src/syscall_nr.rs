@@ -117,4 +117,20 @@ impl SyscallNr {
     pub const SIGNALFD4: Self = Self(289);
     pub const TIMERFD_CREATE: Self = Self(283);
     pub const INOTIFY_INIT1: Self = Self(294);
+    pub const SOCKETPAIR: Self = Self(53);
+    pub const READV: Self = Self(19);
+    pub const WRITEV: Self = Self(20);
+    pub const SYMLINKAT: Self = Self(266);
+    pub const READLINKAT: Self = Self(267);
+    pub const FACCESSAT: Self = Self(269);
+    pub const UTIMENSAT: Self = Self(280);
+    pub const PSELECT6: Self = Self(270);
+    pub const PPOLL: Self = Self(271);
+    pub const SENDMMSG: Self = Self(307);
+    pub const RECVMMSG: Self = Self(299);
+    pub const MREMAP: Self = Self(25);
+    pub const MSYNC: Self = Self(26);
+    pub const MLOCK: Self = Self(149);
+    pub const MUNLOCK: Self = Self(150);
+    pub const PRLIMIT: Self = Self(302);
 }
