@@ -41,13 +41,13 @@ pub fn decode_args(
         SyscallNr::BRK => fmt_brk(args),
         SyscallNr::SOCKET => fmt_socket(args),
         SyscallNr::CONNECT | SyscallNr::BIND => fmt_connect_bind(args, sockaddr),
-        SyscallNr::ACCEPT | SyscallNr::ACCEPT4 => fmt_accept(args),
+        SyscallNr::ACCEPT | SyscallNr::ACCEPT4 => fmt_accept(args, sockaddr),
         SyscallNr::SENDTO => fmt_sendto(args),
         SyscallNr::RECVFROM => fmt_recvfrom(args, ret),
         SyscallNr::SENDMSG | SyscallNr::SENDMMSG => fmt_sendmsg(args),
         SyscallNr::RECVMSG | SyscallNr::RECVMMSG => fmt_recvmsg(args),
         SyscallNr::LISTEN => fmt_listen(args),
-        SyscallNr::GETSOCKNAME | SyscallNr::GETPEERNAME => fmt_getname(args),
+        SyscallNr::GETSOCKNAME | SyscallNr::GETPEERNAME => fmt_getname(args, sockaddr),
         SyscallNr::SETSOCKOPT | SyscallNr::GETSOCKOPT => fmt_sockopt(args),
         SyscallNr::SOCKETPAIR => fmt_socketpair(args),
         SyscallNr::FORK | SyscallNr::VFORK => String::new(),
@@ -359,8 +359,8 @@ fn format_sockaddr(bytes: &[u8], fallback_ptr: u64) -> String {
     }
 }
 
-fn fmt_accept(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", fd(args[0]), ptr(args[1]), ptr(args[2]))
+fn fmt_accept(args: &[u64; 6], sockaddr: &[u8]) -> String {
+    format!("{}, {}, {}", fd(args[0]), format_sockaddr(sockaddr, args[1]), ptr(args[2]))
 }
 
 fn fmt_sendto(args: &[u64; 6]) -> String {
@@ -376,8 +376,8 @@ fn fmt_listen(args: &[u64; 6]) -> String {
     format!("{}, {}", fd(args[0]), args[1])
 }
 
-fn fmt_getname(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", fd(args[0]), ptr(args[1]), ptr(args[2]))
+fn fmt_getname(args: &[u64; 6], sockaddr: &[u8]) -> String {
+    format!("{}, {}, {}", fd(args[0]), format_sockaddr(sockaddr, args[1]), ptr(args[2]))
 }
 
 fn fmt_sockopt(args: &[u64; 6]) -> String {
