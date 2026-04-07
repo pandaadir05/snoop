@@ -125,3 +125,40 @@
 - `GIT_SHA` falls back to `"unknown"` for tarball builds lacking `.git/`.
 
 **State:** `cargo build` ✓  `cargo test` ✓  (10 tests pass, 0 warnings)
+
+---
+
+## 2026-04-08 — Follow mode and complete syscall decoder coverage
+
+**What changed:**
+
+*snoop-ebpf*
+- Added `FOLLOW_MODE: Array<u8>` — single-element flag set by userspace when `--follow` is active.
+- Added `EXTRA_PIDS: HashMap<u32, u8>` — runtime set of child PIDs to trace.
+- `sys_enter` now allows a process if `pid == TARGET_PID` OR `pid ∈ EXTRA_PIDS`.
+- `sys_exit` inserts the return value of fork/vfork/clone/clone3 into `EXTRA_PIDS`
+  when `FOLLOW_MODE == 1` and `ret > 0` (parent side of the fork).
+
+*snoop userspace*
+- `loader::load()` gains a `follow: bool` parameter; sets `FOLLOW_MODE[0] = 1` before
+  attaching tracepoints.
+- Spawn mode always enables follow (the entire command tree is the trace target).
+- Attach mode honours the `--follow` CLI flag.
+
+*syscall decoder*
+- Added decoders for all remaining ROADMAP syscalls: fork/vfork (no args),
+  getpid family (no args), ftruncate, truncate, fsync/fdatasync, madvise,
+  sendmsg/recvmsg/sendmmsg/recvmmsg, socketpair, sendfile, splice, memfd_create,
+  getdents64, readv/writev, mremap, msync, prlimit64, nanosleep.
+- Fixed `fchdir`: was incorrectly using the path decoder (takes an fd, not a pointer).
+- Added 17 new `SyscallNr` constants.
+
+**Decisions:**
+- `EXTRA_PIDS` is a `HashMap<u32, u8>` used as a hash set (value always 1).
+  Max 1 024 entries — sufficient for typical process trees; expand in v0.2 if needed.
+- Spawn mode unconditionally enables follow mode. A spawned command's children
+  are logically part of the trace and excluding them would surprise users.
+- `maybe_follow_child()` is `#[inline(always)]` and has an early return when
+  `FOLLOW_MODE == 0`, so the cost in the common case is one map lookup and branch.
+
+**State:** `cargo build` ✓  `cargo test` ✓  (10 tests pass, 0 warnings)
