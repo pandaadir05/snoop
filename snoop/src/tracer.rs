@@ -15,7 +15,8 @@ use crate::{
     filter::Filter,
     flamegraph::FlamegraphCollector,
     loader,
-    output::{raw::RawOutput, tui::TuiApp, OutputMode},
+    output::{json::JsonOutput, raw::RawOutput, tui::TuiApp, OutputMode},
+    record::TraceWriter,
 };
 
 /// Spawn a new process and trace it.
@@ -163,7 +164,7 @@ async fn consume_ring_buf(
     }
 }
 
-/// Drive the output layer (raw or TUI) until the user quits or the trace ends.
+/// Drive the output layer (raw, JSON, or TUI) until the user quits or the trace ends.
 async fn run_output(
     rx: mpsc::Receiver<SyscallEvent>,
     done: watch::Receiver<bool>,
@@ -173,8 +174,9 @@ async fn run_output(
     target_pid: Option<u32>,
 ) -> Result<()> {
     match mode {
-        OutputMode::Raw => run_raw(rx, done, filter, flamegraph).await,
-        OutputMode::Tui => run_tui(rx, done, filter, flamegraph, target_pid).await,
+        OutputMode::Raw  => run_raw(rx, done, filter, flamegraph).await,
+        OutputMode::Json => run_json(rx, done, filter, flamegraph).await,
+        OutputMode::Tui  => run_tui(rx, done, filter, flamegraph, target_pid).await,
     }
 }
 
@@ -216,6 +218,43 @@ async fn run_raw(
     Ok(())
 }
 
+async fn run_json(
+    mut rx: mpsc::Receiver<SyscallEvent>,
+    mut done: watch::Receiver<bool>,
+    filter: Filter,
+    flamegraph: Option<PathBuf>,
+) -> Result<()> {
+    let out = JsonOutput::new(filter);
+    let mut fg = flamegraph.as_ref().map(|_| FlamegraphCollector::new());
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let Some(ref mut collector) = fg {
+                    collector.record(&event);
+                }
+                out.handle(&event).context("write error")?;
+            }
+            _ = done.changed() => {
+                if *done.borrow() {
+                    while let Ok(event) = rx.try_recv() {
+                        if let Some(ref mut collector) = fg {
+                            collector.record(&event);
+                        }
+                        out.handle(&event).context("write error")?;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    if let (Some(collector), Some(path)) = (fg, flamegraph) {
+        collector.write_svg(&path)?;
+    }
+    Ok(())
+}
+
 async fn run_tui(
     rx: mpsc::Receiver<SyscallEvent>,
     done: watch::Receiver<bool>,
@@ -229,5 +268,99 @@ async fn run_tui(
     if let (Some(collector), Some(path)) = (fg, flamegraph) {
         collector.write_svg(&path)?;
     }
+    Ok(())
+}
+
+// ── record mode ───────────────────────────────────────────────────────────────
+
+/// Spawn a command, trace it, and write all events to `output_path`.
+pub async fn record_spawn(
+    cmd: &[String],
+    output_path: PathBuf,
+    ebpf_obj: Option<PathBuf>,
+) -> Result<()> {
+    if cmd.is_empty() {
+        bail!("no command specified");
+    }
+
+    let mut child = tokio::process::Command::new(&cmd[0])
+        .args(&cmd[1..])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .with_context(|| format!("failed to spawn `{}`", cmd[0]))?;
+
+    let pid = child.id().context("child process has already exited")?;
+    let ebpf = loader::load(pid, true, ebpf_obj)?;
+    let (tx, rx) = mpsc::channel(4096);
+    let (done_tx, done_rx) = watch::channel(false);
+
+    tokio::select! {
+        res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
+        res = record_events(rx, done_rx, output_path.clone()) => res?,
+        status = child.wait() => {
+            let _ = done_tx.send(true);
+            let code = status?.code().unwrap_or(-1);
+            log::info!("child exited with status {code}");
+        }
+    }
+
+    log::info!("trace written to {}", output_path.display());
+    Ok(())
+}
+
+/// Attach to a running process and record events to `output_path`.
+pub async fn record_attach(
+    pid: u32,
+    follow: bool,
+    output_path: PathBuf,
+    ebpf_obj: Option<PathBuf>,
+) -> Result<()> {
+    if !process_exists(pid) {
+        bail!("process {pid} does not exist");
+    }
+
+    let ebpf = loader::load(pid, follow, ebpf_obj)?;
+    let (tx, rx) = mpsc::channel(4096);
+    let (_done_tx, done_rx) = watch::channel(false);
+    let done_tx_clone = _done_tx.clone();
+
+    tokio::select! {
+        res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
+        res = record_events(rx, done_rx, output_path.clone()) => res?,
+        _ = watch_pid(pid, done_tx_clone) => {}
+    }
+
+    log::info!("trace written to {}", output_path.display());
+    Ok(())
+}
+
+/// Consume events from `rx` and write them to a `.snoop` file.
+async fn record_events(
+    mut rx: mpsc::Receiver<SyscallEvent>,
+    mut done: watch::Receiver<bool>,
+    path: PathBuf,
+) -> Result<()> {
+    let mut writer = TraceWriter::create(&path)?;
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                writer.write_event(&event).context("failed to write event")?;
+            }
+            _ = done.changed() => {
+                if *done.borrow() {
+                    while let Ok(event) = rx.try_recv() {
+                        writer.write_event(&event).context("failed to write event")?;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    let count = writer.finish().context("failed to flush trace file")?;
+    eprintln!("recorded {count} events to {}", path.display());
     Ok(())
 }

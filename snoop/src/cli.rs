@@ -1,13 +1,14 @@
 //! Command-line interface definition.
 //!
-//! snoop operates in two modes:
-//! * **spawn** — `snoop [options] <cmd> [args…]`   start and trace a new process
-//! * **attach** — `snoop -p <pid> [options]`        attach to an existing process
+//! snoop has three modes:
+//! * **trace (default)** — `snoop [options] <-p PID | CMD [ARGS]>`
+//! * **record** — `snoop record [options] -o trace.snoop <-p PID | CMD [ARGS]>`
+//! * **view** — `snoop view [options] trace.snoop`
 
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
-use clap::{ArgGroup, Parser};
+use clap::{ArgGroup, Parser, Subcommand};
 
 use crate::{filter::Filter, output::OutputMode};
 
@@ -20,16 +21,14 @@ use crate::{filter::Filter, output::OutputMode};
     about = "strace, but you actually want to use it.",
     long_about = None,
 )]
-#[command(group(
-    ArgGroup::new("target")
-        .required(true)
-        .args(["pid", "command"]),
-))]
 pub struct Cli {
-    // --- Target selection ---
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
+    // ── trace mode (default when no subcommand given) ──────────────────────
 
     /// Attach to an existing process by PID.
-    #[arg(short = 'p', long, value_name = "PID", conflicts_with = "command")]
+    #[arg(short = 'p', long, value_name = "PID", global = false)]
     pub pid: Option<u32>,
 
     /// Also trace children spawned by the target process (`clone`/`fork`).
@@ -47,17 +46,23 @@ pub struct Cli {
         allow_hyphen_values = true,
         trailing_var_arg = true,
     )]
-    pub command: Vec<String>,
+    pub cmd: Vec<String>,
 
-    // --- Output mode ---
+    // ── output mode ────────────────────────────────────────────────────────
 
     /// Print strace-compatible one-line output instead of the TUI.
     ///
     /// Automatically selected when stdout is not a TTY.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "json")]
     pub raw: bool,
 
-    // --- Filtering ---
+    /// Emit one JSON object per syscall (JSON Lines / NDJSON).
+    ///
+    /// Ideal for piping to `jq`.  Implies `--raw` mode.
+    #[arg(long)]
+    pub json: bool,
+
+    // ── filtering ──────────────────────────────────────────────────────────
 
     /// Restrict output to file-system syscalls.
     #[arg(long, conflicts_with_all = ["net"])]
@@ -81,13 +86,9 @@ pub struct Cli {
     #[arg(long)]
     pub no_decode: bool,
 
-    // --- Advanced ---
+    // ── advanced ───────────────────────────────────────────────────────────
 
     /// Write a flamegraph SVG to PATH when the trace ends.
-    ///
-    /// The flamegraph shows time-weighted syscall distribution per process,
-    /// using the `inferno` library (identical to `cargo flamegraph` output).
-    /// Works with both `--raw` and TUI modes.
     #[arg(long, value_name = "PATH")]
     pub flamegraph: Option<PathBuf>,
 
@@ -100,33 +101,174 @@ pub struct Cli {
     pub ebpf_obj: Option<PathBuf>,
 }
 
+/// Optional subcommand.
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Record a trace to a file for later replay.
+    ///
+    /// Example: `sudo snoop record -p 1234 -o trace.snoop`
+    #[command(group(
+        ArgGroup::new("target")
+            .required(true)
+            .args(["pid", "command"]),
+    ))]
+    Record {
+        /// Attach to an existing process by PID.
+        #[arg(short = 'p', long, value_name = "PID")]
+        pid: Option<u32>,
+
+        /// Also trace children (`clone`/`fork`).
+        #[arg(long, requires = "pid")]
+        follow: bool,
+
+        /// Command to spawn and trace.
+        #[arg(
+            value_name = "CMD",
+            last = false,
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+        )]
+        command: Vec<String>,
+
+        /// Write trace to this file (default: `trace.snoop`).
+        #[arg(short = 'o', long, value_name = "FILE", default_value = "trace.snoop")]
+        output: PathBuf,
+
+        /// Path to compiled eBPF object (overrides embedded).
+        #[arg(long, value_name = "PATH", env = "SNOOP_EBPF_OBJ")]
+        ebpf_obj: Option<PathBuf>,
+    },
+
+    /// View a previously recorded trace file.
+    ///
+    /// No root required.  All display filters apply.
+    ///
+    /// Example: `snoop view trace.snoop --files --slow 5`
+    View {
+        /// Trace file to view.
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Print strace-compatible one-line output instead of the TUI.
+        #[arg(long, conflicts_with = "json")]
+        raw: bool,
+
+        /// Emit one JSON object per syscall.
+        #[arg(long)]
+        json: bool,
+
+        /// Restrict output to file-system syscalls.
+        #[arg(long, conflicts_with_all = ["net"])]
+        files: bool,
+
+        /// Restrict output to network syscalls.
+        #[arg(long, conflicts_with_all = ["files"])]
+        net: bool,
+
+        /// Only show syscalls longer than MILLIS milliseconds.
+        #[arg(long, value_name = "MILLIS")]
+        slow: Option<f64>,
+
+        /// Only show the named syscall(s).
+        #[arg(long = "syscall", value_name = "NAME")]
+        syscalls: Vec<String>,
+
+        /// Show raw hex arguments without decoding.
+        #[arg(long)]
+        no_decode: bool,
+    },
+}
+
 impl Cli {
     /// Parse arguments from `std::env::args_os()`.
     pub fn parse_args() -> Self {
         Self::parse()
     }
 
-    /// Validate the parsed arguments and dispatch to the tracer.
+    /// Validate the parsed arguments and dispatch to the tracer or viewer.
     pub async fn run(self) -> Result<()> {
-        #[cfg(not(target_os = "linux"))]
-        {
-            bail!("snoop requires a Linux kernel (eBPF tracepoints are not available on this OS)");
-        }
+        match self.command {
+            Some(Command::View {
+                file,
+                raw,
+                json,
+                files,
+                net,
+                slow,
+                syscalls,
+                no_decode,
+            }) => {
+                let filter = Filter {
+                    category_files: files,
+                    category_net: net,
+                    slow_threshold_ns: slow.map(|ms| (ms * 1_000_000.0) as u64),
+                    syscall_allowlist: if syscalls.is_empty() { None } else { Some(syscalls) },
+                    no_decode,
+                };
+                let mode = if json {
+                    OutputMode::Json
+                } else if raw || !is_tty() {
+                    OutputMode::Raw
+                } else {
+                    OutputMode::Tui
+                };
+                return crate::viewer::run(&file, filter, mode).await;
+            }
 
-        #[cfg(target_os = "linux")]
-        {
-            // Check that we have CAP_BPF / root before spending time on setup.
-            check_privileges()?;
+            #[allow(unused_variables)]
+            Some(Command::Record {
+                pid,
+                follow,
+                command,
+                output,
+                ebpf_obj,
+            }) => {
+                #[cfg(not(target_os = "linux"))]
+                bail!("snoop requires Linux");
 
-            let filter = self.build_filter();
-            let mode = self.output_mode();
-            let flamegraph = self.flamegraph;
+                #[cfg(target_os = "linux")]
+                {
+                    check_privileges()?;
+                    if let Some(pid) = pid {
+                        return crate::tracer::record_attach(
+                            pid, follow, output, ebpf_obj,
+                        )
+                        .await;
+                    } else {
+                        return crate::tracer::record_spawn(&command, output, ebpf_obj).await;
+                    }
+                }
+            }
 
-            if let Some(pid) = self.pid {
-                crate::tracer::attach(pid, self.follow, filter, mode, flamegraph, self.ebpf_obj)
-                    .await
-            } else {
-                crate::tracer::spawn(&self.command, filter, mode, flamegraph, self.ebpf_obj).await
+            None => {
+                // Default trace mode — require either --pid or a command.
+                #[cfg(not(target_os = "linux"))]
+                bail!("snoop requires a Linux kernel (eBPF tracepoints are not available on this OS)");
+
+                #[cfg(target_os = "linux")]
+                {
+                    if self.pid.is_none() && self.cmd.is_empty() {
+                        bail!("specify a target: --pid <PID> or a command to run");
+                    }
+
+                    check_privileges()?;
+
+                    let filter = self.build_filter();
+                    let mode = self.output_mode();
+                    let flamegraph = self.flamegraph;
+
+                    if let Some(pid) = self.pid {
+                        crate::tracer::attach(
+                            pid, self.follow, filter, mode, flamegraph, self.ebpf_obj,
+                        )
+                        .await
+                    } else {
+                        crate::tracer::spawn(
+                            &self.cmd, filter, mode, flamegraph, self.ebpf_obj,
+                        )
+                        .await
+                    }
+                }
             }
         }
     }
@@ -146,7 +288,9 @@ impl Cli {
     }
 
     fn output_mode(&self) -> OutputMode {
-        if self.raw || !is_tty() {
+        if self.json {
+            OutputMode::Json
+        } else if self.raw || !is_tty() {
             OutputMode::Raw
         } else {
             OutputMode::Tui
@@ -161,23 +305,12 @@ fn is_tty() -> bool {
 }
 
 /// Verify that the process has the privileges required to load eBPF programs.
-///
-/// On kernels >= 5.8 with `CAP_BPF`, non-root users may load programs if the
-/// capability is granted.  On older kernels or when capability is absent,
-/// effective UID 0 is required.
 #[cfg(target_os = "linux")]
 fn check_privileges() -> Result<()> {
-    // Safety: getuid() always succeeds.
     let euid = unsafe { libc::geteuid() };
     if euid == 0 {
         return Ok(());
     }
-
-    // Try a best-effort CAP_BPF check via prctl.  If the kernel doesn't
-    // support it we fall through and let aya report the actual error.
-    //
-    // A proper check via `capget(2)` would need unsafe + niche structs; for
-    // a v0.1 tool that almost always needs root anyway, this is sufficient.
     bail!(
         "snoop requires root or CAP_BPF (current euid = {euid}).\n\
          Run with: sudo snoop …"

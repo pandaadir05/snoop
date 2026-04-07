@@ -1,5 +1,6 @@
 //! Output modes.
 
+pub mod json;
 pub mod raw;
 pub mod tui;
 
@@ -10,4 +11,6 @@ pub enum OutputMode {
     Raw,
     /// Full-screen ratatui TUI.
     Tui,
+    /// JSON objects, one per line (NDJSON / JSON Lines).
+    Json,
 }
