@@ -15,6 +15,8 @@ mod error;
 mod filter;
 mod flamegraph;
 mod output;
+mod record;
+mod viewer;
 
 #[cfg(target_os = "linux")]
 mod loader;

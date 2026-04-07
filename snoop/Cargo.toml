@@ -33,6 +33,9 @@ inferno = { version = "0.12", default-features = false }
 aya     = { version = "0.13", features = ["async_tokio"] }
 aya-log = "0.2"
 
+[dev-dependencies]
+tempfile = "3"
+
 [build-dependencies]
 # aya-build runs a sub-cargo that compiles snoop-ebpf for bpfel-unknown-none.
 # It is only invoked when building on Linux; on other hosts the build script
