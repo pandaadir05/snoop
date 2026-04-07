@@ -34,7 +34,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, TableState},
+    widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState},
     Frame, Terminal,
 };
 use snoop_common::{SyscallEvent, SyscallNr};
@@ -81,6 +81,8 @@ pub struct TuiApp {
     target_exited: bool,
     /// Optional flamegraph accumulator; `None` when `--flamegraph` was not set.
     fg_collector: Option<FlamegraphCollector>,
+    /// When `Some`, a detail popup is shown for the event at this index.
+    detail_idx: Option<usize>,
 }
 
 impl TuiApp {
@@ -109,6 +111,7 @@ impl TuiApp {
             target_comm: String::new(),
             target_exited: false,
             fg_collector: if collect_flamegraph { Some(FlamegraphCollector::new()) } else { None },
+            detail_idx: None,
         }
     }
 
@@ -235,6 +238,17 @@ impl TuiApp {
 
     /// Handle a key event.  Returns `true` if the user wants to quit.
     fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // If the detail popup is open, Esc or Enter closes it.
+        if self.detail_idx.is_some() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                    self.detail_idx = None;
+                }
+                _ => {}
+            }
+            return false;
+        }
+
         if self.searching {
             return self.handle_search_key(key);
         }
@@ -293,6 +307,15 @@ impl TuiApp {
             KeyCode::Home | KeyCode::Char('g') => {
                 if !self.events.is_empty() {
                     self.stream_state.select(Some(0));
+                }
+            }
+
+            // Open detail popup for the currently selected event.
+            KeyCode::Enter => {
+                if let Some(idx) = self.stream_state.selected() {
+                    if idx < self.events.len() {
+                        self.detail_idx = Some(idx);
+                    }
                 }
             }
 
@@ -360,6 +383,13 @@ impl TuiApp {
         self.render_header(f, chunks[0]);
         self.render_main(f, chunks[1]);
         self.render_footer(f, chunks[2]);
+
+        // Detail popup overlays everything else.
+        if let Some(idx) = self.detail_idx {
+            if let Some(ev) = self.events.get(idx) {
+                render_detail_popup(f, area, ev);
+            }
+        }
     }
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
@@ -511,10 +541,12 @@ impl TuiApp {
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let text = if self.searching {
+        let text = if self.detail_idx.is_some() {
+            " [Esc/Enter] close detail".to_owned()
+        } else if self.searching {
             format!(" search: {}█", self.search)
         } else {
-            " [q]uit  [Space]pause  [/]search  [f]iles  [n]et  [c]lear  [↑↓]scroll  [G]bottom"
+            " [q]uit  [Space]pause  [Enter]detail  [/]search  [f]iles  [n]et  [c]lear  [↑↓]scroll"
                 .to_owned()
         };
 
@@ -527,6 +559,64 @@ impl TuiApp {
         let para = Paragraph::new(text).style(style);
         f.render_widget(para, area);
     }
+}
+
+/// Render a detail popup over the full terminal area for the given event.
+fn render_detail_popup(f: &mut Frame, area: Rect, ev: &DecodedEvent) {
+    // Centre a box that is 70% wide and 12 rows tall.
+    let popup_w = (area.width * 70 / 100).max(50).min(area.width.saturating_sub(4));
+    let popup_h = 14u16.min(area.height.saturating_sub(4));
+    let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
+    let popup_area = Rect::new(x, y, popup_w, popup_h);
+
+    let elapsed_s  = ev.timestamp_ns as f64 / 1_000_000_000.0;
+    let dur_ms     = ev.duration_ns as f64 / 1_000_000.0;
+
+    let lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled("syscall:   ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(ev.name, Style::default().fg(Color::Green)),
+        ]),
+        Line::from(vec![
+            Span::styled("process:   ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!("{} (pid {}, tid {})", ev.comm, ev.pid, ev.tid)),
+        ]),
+        Line::from(vec![
+            Span::styled("timestamp: ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(format!("{:.6}s since boot", elapsed_s)),
+        ]),
+        Line::from(vec![
+            Span::styled("duration:  ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:.3}ms", dur_ms),
+                if dur_ms > 10.0 { Style::default().fg(Color::Red) }
+                else { Style::default().fg(Color::White) },
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("args:      ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(ev.args_str.clone()),
+        ]),
+        Line::from(vec![
+            Span::styled("return:    ", Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw(ev.ret_str.clone()),
+        ]),
+    ];
+
+    // Clear the background area first so the popup renders cleanly.
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(format!(" {} ", ev.name))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
+
+    f.render_widget(para, popup_area);
 }
 
 /// Pick a display color for a syscall category.
