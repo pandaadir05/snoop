@@ -1,0 +1,24 @@
+# Rust build artifacts
+/target/
+
+# Cargo lock for libraries (keep for binaries/workspaces)
+# Cargo.lock is committed for workspace roots
+
+# Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.#*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
+
+# Benchmark artifacts
+criterion/
