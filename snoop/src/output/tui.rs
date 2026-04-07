@@ -43,6 +43,7 @@ use tokio::sync::mpsc;
 use crate::{
     decode::{comm_to_string, DecodedEvent},
     filter::Filter,
+    flamegraph::FlamegraphCollector,
 };
 
 /// Maximum number of events kept in the scrollback buffer.
@@ -78,11 +79,21 @@ pub struct TuiApp {
     target_comm: String,
     /// Set to `true` when the target process has exited.
     target_exited: bool,
+    /// Optional flamegraph accumulator; `None` when `--flamegraph` was not set.
+    fg_collector: Option<FlamegraphCollector>,
 }
 
 impl TuiApp {
     /// Create a new TUI application.
+    ///
+    /// Pass `collect_flamegraph = true` to enable flamegraph data collection;
+    /// the collector is returned from `run` so the caller can write the SVG.
     pub fn new(filter: Filter, target_pid: Option<u32>) -> Self {
+        Self::with_flamegraph(filter, target_pid, false)
+    }
+
+    /// Create a TUI application, optionally enabling flamegraph collection.
+    pub fn with_flamegraph(filter: Filter, target_pid: Option<u32>, collect_flamegraph: bool) -> Self {
         Self {
             filter,
             events: Vec::with_capacity(1024),
@@ -97,6 +108,7 @@ impl TuiApp {
             target_pid,
             target_comm: String::new(),
             target_exited: false,
+            fg_collector: if collect_flamegraph { Some(FlamegraphCollector::new()) } else { None },
         }
     }
 
@@ -113,6 +125,17 @@ impl TuiApp {
             self.target_comm = comm_to_string(&event.comm);
         }
 
+        // Always record for flamegraph regardless of display filter or pause state.
+        if let Some(ref mut fg) = self.fg_collector {
+            fg.record(event);
+        }
+
+        // When paused, skip updating the display buffer and counts so the
+        // user sees a frozen snapshot.  Flamegraph data is still collected above.
+        if self.paused {
+            return;
+        }
+
         if !self.filter.accepts(event) {
             return;
         }
@@ -125,12 +148,10 @@ impl TuiApp {
         }
         self.events.push(decoded);
 
-        // Auto-scroll to bottom when not paused.
-        if !self.paused {
-            let len = self.events.len();
-            if len > 0 {
-                self.stream_state.select(Some(len - 1));
-            }
+        // Auto-scroll to bottom.
+        let len = self.events.len();
+        if len > 0 {
+            self.stream_state.select(Some(len - 1));
         }
     }
 
@@ -138,11 +159,14 @@ impl TuiApp {
     ///
     /// This function takes ownership of the terminal, restores it on exit,
     /// and only returns once the user quits or the trace is complete.
+    ///
+    /// Returns the flamegraph collector if one was configured so the caller
+    /// can write the SVG after the terminal is restored.
     pub async fn run(
         mut self,
         mut rx: mpsc::Receiver<SyscallEvent>,
         mut done: tokio::sync::watch::Receiver<bool>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Option<FlamegraphCollector>> {
         // Set up the terminal.
         enable_raw_mode()?;
         let mut stderr = io::stderr();
@@ -161,7 +185,7 @@ impl TuiApp {
         )?;
         terminal.show_cursor()?;
 
-        result
+        result.map(|()| self.fg_collector)
     }
 
     async fn event_loop(
@@ -177,9 +201,7 @@ impl TuiApp {
             loop {
                 match rx.try_recv() {
                     Ok(ev) => {
-                        if !self.paused {
-                            self.push(&ev);
-                        }
+                        self.push(&ev);
                     }
                     Err(mpsc::error::TryRecvError::Empty) => break,
                     Err(mpsc::error::TryRecvError::Disconnected) => {

@@ -13,6 +13,7 @@ use tokio::{
 
 use crate::{
     filter::Filter,
+    flamegraph::FlamegraphCollector,
     loader,
     output::{raw::RawOutput, tui::TuiApp, OutputMode},
 };
@@ -22,6 +23,7 @@ pub async fn spawn(
     cmd: &[String],
     filter: Filter,
     mode: OutputMode,
+    flamegraph: Option<PathBuf>,
     ebpf_obj: Option<PathBuf>,
 ) -> Result<()> {
     if cmd.is_empty() {
@@ -54,7 +56,7 @@ pub async fn spawn(
     // Drive the ring-buffer consumer and the child watcher concurrently.
     tokio::select! {
         res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
-        res = run_output(rx, done_rx, filter, mode, Some(pid)) => res?,
+        res = run_output(rx, done_rx, filter, mode, flamegraph, Some(pid)) => res?,
         status = child.wait() => {
             let _ = done_tx.send(true);
             let code = status?.code().unwrap_or(-1);
@@ -71,6 +73,7 @@ pub async fn attach(
     _follow: bool,
     filter: Filter,
     mode: OutputMode,
+    flamegraph: Option<PathBuf>,
     ebpf_obj: Option<PathBuf>,
 ) -> Result<()> {
     // Verify the process exists before we try to load eBPF.
@@ -88,7 +91,7 @@ pub async fn attach(
 
     tokio::select! {
         res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
-        res = run_output(rx, done_rx, filter, mode, Some(pid)) => res?,
+        res = run_output(rx, done_rx, filter, mode, flamegraph, Some(pid)) => res?,
         _ = watch_pid(pid_for_watcher, done_tx_clone) => {}
     }
 
@@ -161,11 +164,12 @@ async fn run_output(
     done: watch::Receiver<bool>,
     filter: Filter,
     mode: OutputMode,
+    flamegraph: Option<PathBuf>,
     target_pid: Option<u32>,
 ) -> Result<()> {
     match mode {
-        OutputMode::Raw => run_raw(rx, done, filter).await,
-        OutputMode::Tui => run_tui(rx, done, filter, target_pid).await,
+        OutputMode::Raw => run_raw(rx, done, filter, flamegraph).await,
+        OutputMode::Tui => run_tui(rx, done, filter, flamegraph, target_pid).await,
     }
 }
 
@@ -173,32 +177,52 @@ async fn run_raw(
     mut rx: mpsc::Receiver<SyscallEvent>,
     mut done: watch::Receiver<bool>,
     filter: Filter,
+    flamegraph: Option<PathBuf>,
 ) -> Result<()> {
     let out = RawOutput::new(filter);
+    let mut fg = flamegraph.as_ref().map(|_| FlamegraphCollector::new());
+
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
+                if let Some(ref mut collector) = fg {
+                    collector.record(&event);
+                }
                 out.handle(&event).context("write error")?;
             }
             _ = done.changed() => {
                 if *done.borrow() {
                     // Drain remaining events.
                     while let Ok(event) = rx.try_recv() {
+                        if let Some(ref mut collector) = fg {
+                            collector.record(&event);
+                        }
                         out.handle(&event).context("write error")?;
                     }
-                    return Ok(());
+                    break;
                 }
             }
         }
     }
+
+    if let (Some(collector), Some(path)) = (fg, flamegraph) {
+        collector.write_svg(&path)?;
+    }
+    Ok(())
 }
 
 async fn run_tui(
     rx: mpsc::Receiver<SyscallEvent>,
     done: watch::Receiver<bool>,
     filter: Filter,
+    flamegraph: Option<PathBuf>,
     target_pid: Option<u32>,
 ) -> Result<()> {
-    let app = TuiApp::new(filter, target_pid);
-    app.run(rx, done).await
+    let collect = flamegraph.is_some();
+    let app = TuiApp::with_flamegraph(filter, target_pid, collect);
+    let fg = app.run(rx, done).await?;
+    if let (Some(collector), Some(path)) = (fg, flamegraph) {
+        collector.write_svg(&path)?;
+    }
+    Ok(())
 }

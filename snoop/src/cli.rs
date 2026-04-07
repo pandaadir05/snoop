@@ -15,7 +15,7 @@ use crate::{filter::Filter, output::OutputMode};
 #[derive(Debug, Parser)]
 #[command(
     name = "snoop",
-    version,
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_SHA"), ")"),
     author,
     about = "strace, but you actually want to use it.",
     long_about = None,
@@ -83,6 +83,14 @@ pub struct Cli {
 
     // --- Advanced ---
 
+    /// Write a flamegraph SVG to PATH when the trace ends.
+    ///
+    /// The flamegraph shows time-weighted syscall distribution per process,
+    /// using the `inferno` library (identical to `cargo flamegraph` output).
+    /// Works with both `--raw` and TUI modes.
+    #[arg(long, value_name = "PATH")]
+    pub flamegraph: Option<PathBuf>,
+
     /// Path to the compiled eBPF object file.
     ///
     /// Defaults to the embedded object compiled at build time.  Override
@@ -112,11 +120,13 @@ impl Cli {
 
             let filter = self.build_filter();
             let mode = self.output_mode();
+            let flamegraph = self.flamegraph;
 
             if let Some(pid) = self.pid {
-                crate::tracer::attach(pid, self.follow, filter, mode, self.ebpf_obj).await
+                crate::tracer::attach(pid, self.follow, filter, mode, flamegraph, self.ebpf_obj)
+                    .await
             } else {
-                crate::tracer::spawn(&self.command, filter, mode, self.ebpf_obj).await
+                crate::tracer::spawn(&self.command, filter, mode, flamegraph, self.ebpf_obj).await
             }
         }
     }

@@ -24,6 +24,9 @@ thiserror   = "2"
 ratatui   = "0.30"
 crossterm = "0.29"
 
+# Flamegraph export
+inferno = { version = "0.12", default-features = false }
+
 # aya and friends are Linux-only.  On macOS the crate still compiles for
 # IDE support; the Linux-gated modules are simply excluded.
 [target.'cfg(target_os = "linux")'.dependencies]

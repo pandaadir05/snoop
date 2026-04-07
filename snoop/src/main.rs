@@ -13,6 +13,7 @@ mod cli;
 mod decode;
 mod error;
 mod filter;
+mod flamegraph;
 mod output;
 
 #[cfg(target_os = "linux")]
