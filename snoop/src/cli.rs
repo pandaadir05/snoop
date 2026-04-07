@@ -139,6 +139,21 @@ pub enum Command {
         ebpf_obj: Option<PathBuf>,
     },
 
+    /// Compare two recorded trace files.
+    ///
+    /// Shows syscall count changes, median-duration regressions, and
+    /// syscalls that appear in one trace but not the other.
+    ///
+    /// Example: `snoop diff before.snoop after.snoop`
+    Diff {
+        /// First (baseline) trace file.
+        #[arg(value_name = "A")]
+        a: PathBuf,
+        /// Second (comparison) trace file.
+        #[arg(value_name = "B")]
+        b: PathBuf,
+    },
+
     /// View a previously recorded trace file.
     ///
     /// No root required.  All display filters apply.
@@ -188,6 +203,10 @@ impl Cli {
     /// Validate the parsed arguments and dispatch to the tracer or viewer.
     pub async fn run(self) -> Result<()> {
         match self.command {
+            Some(Command::Diff { a, b }) => {
+                return crate::diff::run(&a, &b).map_err(Into::into);
+            }
+
             Some(Command::View {
                 file,
                 raw,

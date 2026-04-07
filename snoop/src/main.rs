@@ -11,6 +11,7 @@
 
 mod cli;
 mod decode;
+mod diff;
 mod error;
 mod filter;
 mod flamegraph;
