@@ -1,0 +1,4 @@
+# Clippy lints applied project-wide.
+# CI runs: cargo clippy -- -D warnings
+# Additional per-crate allows can be added with #[allow(...)] with a justification comment.
+msrv = "1.82.0"
