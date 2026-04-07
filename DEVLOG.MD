@@ -79,3 +79,49 @@
   build never pulls them in.
 
 **State:** `cargo build` ✓  `cargo test` ✓  (10 tests pass, 0 warnings)
+
+---
+
+## 2026-04-08 — Path capture, flamegraph export, git SHA
+
+**What changed:**
+
+*snoop-common*
+- `SyscallEvent` extended with `path: [u8; 128]`, `path_len: u16`, `_pad: [u8; 6]`
+  (struct remains `repr(C)`, total size ~248 bytes — within ring buffer limits).
+- `PATH_MAX_LEN = 128` exported from the crate.
+- `SyscallEvent::path_str()` returns `Option<&str>` by stripping the null terminator.
+
+*snoop-ebpf*
+- `PATH_BUF: PerCpuArray<[u8; PATH_MAX_LEN]>` added as a per-CPU scratch buffer
+  so path reads never consume the 512-byte BPF stack.
+- `sys_exit` rewritten to use `EVENTS.reserve::<SyscallEvent>(0)` (ring buffer
+  memory, not stack) and write fields via `core::ptr::addr_of_mut!`.
+- `capture_path_arg()` reads the first string argument for ~20 syscall families
+  via `bpf_probe_read_user_str_bytes`, copying into the ring buffer event field
+  through the per-CPU scratch buffer.
+
+*snoop userspace*
+- `decode::decode_args` now accepts `path: Option<&str>`; `path_or_ptr()` helper
+  shows the captured string (quoted) or falls back to the raw pointer hex.
+- `fmt_open`, `fmt_openat`, `fmt_stat`, `fmt_fstatat`, `fmt_statx`, `fmt_execve`,
+  `fmt_execveat`, `fmt_chdir`, `fmt_mkdir`, `fmt_unlink`, `fmt_rename` all use it.
+- `snoop/src/flamegraph.rs` — new `FlamegraphCollector` that accumulates folded
+  stack entries (`comm;syscall_name duration_ns`) and renders an SVG via `inferno`.
+- `--flamegraph <PATH>` CLI flag writes the SVG on exit; works with both raw and
+  TUI modes; flamegraph data is collected before display filters so the SVG covers
+  the full trace.
+- `build.rs` now runs `git rev-parse --short HEAD` and emits `GIT_SHA` so
+  `--version` displays `0.1.0 (abc1234)`.
+
+**Decisions:**
+- `EVENTS.reserve()` (ring buffer allocation) is used instead of constructing
+  a `SyscallEvent` on the BPF stack, which would overflow the 512-byte limit
+  given the 128-byte path field.
+- `inferno` is added with `default-features = false` — the CLI and multithreaded
+  features are unnecessary for a single SVG write at trace exit.
+- Flamegraph collection in TUI mode is gated on `FlamegraphCollector::new()` only
+  when `--flamegraph` is provided, adding zero overhead otherwise.
+- `GIT_SHA` falls back to `"unknown"` for tarball builds lacking `.git/`.
+
+**State:** `cargo build` ✓  `cargo test` ✓  (10 tests pass, 0 warnings)
