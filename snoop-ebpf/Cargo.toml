@@ -2,13 +2,18 @@
 name = "snoop-ebpf"
 version = "0.1.0"
 edition = "2021"
-description = "eBPF programs for snoop (compiled for BPF targets)"
+description = "eBPF programs for snoop (syscall tracepoints)"
 license = "MIT OR Apache-2.0"
+publish = false
 
-# This crate is compiled for BPF targets (bpfel-unknown-none / bpfeb-unknown-none)
-# when deploying eBPF programs. It is included as a workspace member so that
-# IDEs and tooling can resolve types, but a dedicated `cargo build` with
-# --target bpfel-unknown-none is required for actual eBPF deployment.
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 snoop-common = { path = "../snoop-common" }
 
+# aya-ebpf and aya-log-ebpf only compile for BPF targets.
+# The workspace host build (x86_64 / aarch64) skips these.
+[target.'cfg(target_arch = "bpf")'.dependencies]
+aya-ebpf = "0.1"
+aya-log-ebpf = "0.1"
