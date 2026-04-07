@@ -3,11 +3,21 @@ members = [
     "snoop",
     "snoop-common",
     "snoop-ebpf",
+    "xtask",
 ]
+# `cargo build` / `cargo test` without -p target only these crates.
+# xtask and snoop-ebpf are built explicitly via `cargo xtask` or
+# `cargo build -p snoop-ebpf --target bpfel-unknown-none`.
+default-members = ["snoop", "snoop-common"]
 resolver = "2"
 
-# Release profile optimized for eBPF object size and correctness.
-# LTO + opt-level 3 are important for the BPF verifier passing complex programs.
+# Release profile: LTO + full optimisation.
+# Important for the BPF verifier on the eBPF side and binary size on the
+# userspace side.
 [profile.release]
 lto = true
 opt-level = 3
+strip = "symbols"
+
+[profile.dev]
+opt-level = 1   # avoid extremely slow debug builds on large dep trees
