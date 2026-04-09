@@ -20,7 +20,8 @@
 
 use aya_ebpf::{
     helpers::{
-        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_user_bytes,
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_ns,
+        bpf_probe_read_user_buf,
     },
     macros::{uprobe, uretprobe},
     programs::{ProbeContext, RetProbeContext},
@@ -50,7 +51,7 @@ fn pid_allowed(pid: u32) -> bool {
 /// Uprobe on `SSL_write(SSL *ssl, const void *buf, int num)`.
 ///
 /// Saves `buf` and `num` in `SSL_ENTER` for the exit probe to read.
-#[uprobe(name = "ssl_write_enter")]
+#[uprobe]
 pub fn ssl_write_enter(ctx: ProbeContext) -> u32 {
     match try_ssl_enter(&ctx, true) {
         Ok(()) => 0,
@@ -59,7 +60,7 @@ pub fn ssl_write_enter(ctx: ProbeContext) -> u32 {
 }
 
 /// Uretprobe on `SSL_write` — reads the plaintext buffer and emits a `LibCallEvent`.
-#[uretprobe(name = "ssl_write_exit")]
+#[uretprobe]
 pub fn ssl_write_exit(ctx: RetProbeContext) -> u32 {
     match try_ssl_exit(&ctx, LibFunc::SslWrite as u8) {
         Ok(()) => 0,
@@ -70,7 +71,7 @@ pub fn ssl_write_exit(ctx: RetProbeContext) -> u32 {
 // ── TLS probes: SSL_read ──────────────────────────────────────────────────────
 
 /// Uprobe on `SSL_read(SSL *ssl, void *buf, int num)`.
-#[uprobe(name = "ssl_read_enter")]
+#[uprobe]
 pub fn ssl_read_enter(ctx: ProbeContext) -> u32 {
     match try_ssl_enter(&ctx, false) {
         Ok(()) => 0,
@@ -79,7 +80,7 @@ pub fn ssl_read_enter(ctx: ProbeContext) -> u32 {
 }
 
 /// Uretprobe on `SSL_read` — reads the decrypted buffer and emits a `LibCallEvent`.
-#[uretprobe(name = "ssl_read_exit")]
+#[uretprobe]
 pub fn ssl_read_exit(ctx: RetProbeContext) -> u32 {
     match try_ssl_exit(&ctx, LibFunc::SslRead as u8) {
         Ok(()) => 0,
@@ -89,48 +90,48 @@ pub fn ssl_read_exit(ctx: RetProbeContext) -> u32 {
 
 // ── ltrace probes: malloc ─────────────────────────────────────────────────────
 
-#[uprobe(name = "ltrace_malloc")]
+#[uprobe]
 pub fn ltrace_malloc(ctx: ProbeContext) -> u32 {
     ltrace_enter_impl(&ctx, LibFunc::Malloc as u8)
 }
 
-#[uretprobe(name = "ltrace_malloc_ret")]
+#[uretprobe]
 pub fn ltrace_malloc_ret(ctx: RetProbeContext) -> u32 {
     ltrace_exit_impl(&ctx, LibFunc::Malloc as u8)
 }
 
 // ── ltrace probes: free ───────────────────────────────────────────────────────
 
-#[uprobe(name = "ltrace_free")]
+#[uprobe]
 pub fn ltrace_free(ctx: ProbeContext) -> u32 {
     ltrace_enter_impl(&ctx, LibFunc::Free as u8)
 }
 
-#[uretprobe(name = "ltrace_free_ret")]
+#[uretprobe]
 pub fn ltrace_free_ret(ctx: RetProbeContext) -> u32 {
     ltrace_exit_impl(&ctx, LibFunc::Free as u8)
 }
 
 // ── ltrace probes: calloc ─────────────────────────────────────────────────────
 
-#[uprobe(name = "ltrace_calloc")]
+#[uprobe]
 pub fn ltrace_calloc(ctx: ProbeContext) -> u32 {
     ltrace_enter_impl(&ctx, LibFunc::Calloc as u8)
 }
 
-#[uretprobe(name = "ltrace_calloc_ret")]
+#[uretprobe]
 pub fn ltrace_calloc_ret(ctx: RetProbeContext) -> u32 {
     ltrace_exit_impl(&ctx, LibFunc::Calloc as u8)
 }
 
 // ── ltrace probes: realloc ────────────────────────────────────────────────────
 
-#[uprobe(name = "ltrace_realloc")]
+#[uprobe]
 pub fn ltrace_realloc(ctx: ProbeContext) -> u32 {
     ltrace_enter_impl(&ctx, LibFunc::Realloc as u8)
 }
 
-#[uretprobe(name = "ltrace_realloc_ret")]
+#[uretprobe]
 pub fn ltrace_realloc_ret(ctx: RetProbeContext) -> u32 {
     ltrace_exit_impl(&ctx, LibFunc::Realloc as u8)
 }
@@ -143,7 +144,7 @@ pub fn ltrace_realloc_ret(ctx: RetProbeContext) -> u32 {
 /// `_is_write` is currently unused but retained for future differentiation.
 #[inline(always)]
 fn try_ssl_enter(ctx: &ProbeContext, _is_write: bool) -> Result<(), i64> {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
 
     if !pid_allowed(pid) {
@@ -155,13 +156,12 @@ fn try_ssl_enter(ctx: &ProbeContext, _is_write: bool) -> Result<(), i64> {
     let buf_ptr: u64 = unsafe { ctx.arg(1) }.unwrap_or(0);
     let num: u64 = unsafe { ctx.arg::<u64>(2) }.unwrap_or(0);
 
-    let mut comm = [0u8; 16];
-    let _ = unsafe { bpf_get_current_comm(&mut comm) };
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     let data = SslEnterData {
         buf_ptr,
         num,
-        enter_ns: unsafe { bpf_ktime_get_ns() },
+        enter_ns: bpf_ktime_get_ns(),
         comm,
     };
 
@@ -175,7 +175,7 @@ fn try_ssl_enter(ctx: &ProbeContext, _is_write: bool) -> Result<(), i64> {
 /// and emits a `LibCallEvent` to `LIB_EVENTS`.
 #[inline(always)]
 fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let tid = pid_tgid as u32;
 
@@ -185,8 +185,8 @@ fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
     };
     let _ = unsafe { SSL_ENTER.remove(&pid_tgid) };
 
-    let ret: i64 = unsafe { ctx.ret_val() }.unwrap_or(-1);
-    let exit_ns = unsafe { bpf_ktime_get_ns() };
+    let ret: i64 = ctx.ret().unwrap_or(-1);
+    let exit_ns = bpf_ktime_get_ns();
 
     let mut rb_entry = match unsafe { LIB_EVENTS.reserve::<LibCallEvent>(0) } {
         Some(e) => e,
@@ -235,7 +235,7 @@ fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
             let dest = unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, want) };
 
             let written =
-                if unsafe { bpf_probe_read_user_bytes(enter.buf_ptr as *const u8, dest) }.is_ok() {
+                if unsafe { bpf_probe_read_user_buf(enter.buf_ptr as *const u8, dest) }.is_ok() {
                     unsafe {
                         let data_dst = core::ptr::addr_of_mut!((*ev).data) as *mut u8;
                         core::ptr::copy_nonoverlapping(scratch as *const u8, data_dst, want);
@@ -265,7 +265,7 @@ fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
 /// Saves args and entry timestamp in `LTRACE_ENTER` keyed by pid_tgid.
 #[inline(always)]
 fn ltrace_enter_impl(ctx: &ProbeContext, func: u8) -> u32 {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
 
     if !pid_allowed(pid) {
@@ -281,8 +281,7 @@ fn ltrace_enter_impl(ctx: &ProbeContext, func: u8) -> u32 {
         unsafe { ctx.arg(5) }.unwrap_or(0),
     ];
 
-    let mut comm = [0u8; 16];
-    let _ = unsafe { bpf_get_current_comm(&mut comm) };
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     // Encode the func ID in the high byte of the key so different functions
     // on the same thread don't overwrite each other's entry data.
@@ -290,7 +289,7 @@ fn ltrace_enter_impl(ctx: &ProbeContext, func: u8) -> u32 {
 
     let data = LtraceEnterData {
         args,
-        enter_ns: unsafe { bpf_ktime_get_ns() },
+        enter_ns: bpf_ktime_get_ns(),
         comm,
     };
 
@@ -304,7 +303,7 @@ fn ltrace_enter_impl(ctx: &ProbeContext, func: u8) -> u32 {
 /// `LibCallEvent` to `LIB_EVENTS`.
 #[inline(always)]
 fn ltrace_exit_impl(ctx: &RetProbeContext, func: u8) -> u32 {
-    let pid_tgid = unsafe { bpf_get_current_pid_tgid() };
+    let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
     let tid = pid_tgid as u32;
 
@@ -316,8 +315,8 @@ fn ltrace_exit_impl(ctx: &RetProbeContext, func: u8) -> u32 {
     };
     let _ = unsafe { LTRACE_ENTER.remove(&key) };
 
-    let ret: i64 = unsafe { ctx.ret_val() }.unwrap_or(0);
-    let exit_ns = unsafe { bpf_ktime_get_ns() };
+    let ret: i64 = ctx.ret().unwrap_or(0);
+    let exit_ns = bpf_ktime_get_ns();
 
     let mut rb_entry = match unsafe { LIB_EVENTS.reserve::<LibCallEvent>(0) } {
         Some(e) => e,
