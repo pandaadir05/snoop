@@ -89,6 +89,5 @@ fn kind_label(kind: ActivityKind) -> &'static str {
         ActivityKind::Network => "NET  ",
         ActivityKind::Exec => "EXEC ",
         ActivityKind::Fork => "FORK ",
-        ActivityKind::Other => "     ",
     }
 }

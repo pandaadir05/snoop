@@ -362,16 +362,14 @@ impl Cli {
                     check_privileges()?;
                     if let Some(name) = docker {
                         let resolved = crate::container::resolve_docker(&name)?;
-                        return crate::tracer::record_attach(resolved, true, output, ebpf_obj)
-                            .await;
+                        crate::tracer::record_attach(resolved, true, output, ebpf_obj).await
                     } else if let Some(pod_name) = pod {
                         let resolved = crate::container::resolve_pod(&pod_name, &namespace)?;
-                        return crate::tracer::record_attach(resolved, true, output, ebpf_obj)
-                            .await;
+                        crate::tracer::record_attach(resolved, true, output, ebpf_obj).await
                     } else if let Some(pid) = pid {
-                        return crate::tracer::record_attach(pid, follow, output, ebpf_obj).await;
+                        crate::tracer::record_attach(pid, follow, output, ebpf_obj).await
                     } else {
-                        return crate::tracer::record_spawn(&command, output, ebpf_obj).await;
+                        crate::tracer::record_spawn(&command, output, ebpf_obj).await
                     }
                 }
             }

@@ -1,6 +1,5 @@
 //! High-level tracer that orchestrates loading, consuming, and outputting.
 
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Stdio;
 
@@ -503,7 +502,7 @@ fn wait_for_stop(pid: u32) -> Result<()> {
         let err = std::io::Error::last_os_error();
         bail!("waitpid({pid}) failed: {err}");
     }
-    if unsafe { libc::WIFSTOPPED(status) } {
+    if libc::WIFSTOPPED(status) {
         return Ok(());
     }
     // Unexpected: child exited before we could attach.

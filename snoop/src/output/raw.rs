@@ -6,7 +6,6 @@
 //! ```
 
 use std::io::{self, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use snoop_common::SyscallEvent;
 
@@ -16,21 +15,12 @@ use crate::filter::Filter;
 /// Writes decoded syscall events to stdout in strace-like format.
 pub struct RawOutput {
     filter: Filter,
-    /// Wall-clock epoch at tracer start, used to anchor relative timestamps.
-    start_epoch_ns: u64,
 }
 
 impl RawOutput {
     /// Create a new `RawOutput` instance.
     pub fn new(filter: Filter) -> Self {
-        let start_epoch_ns = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        Self {
-            filter,
-            start_epoch_ns,
-        }
+        Self { filter }
     }
 
     /// Write a single event to stdout.

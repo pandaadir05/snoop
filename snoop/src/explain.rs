@@ -32,8 +32,6 @@ pub struct Activity {
     pub comm: String,
     /// Human-readable one-line summary.
     pub summary: String,
-    /// Total duration from first to last syscall in this activity (ns).
-    pub duration_ns: u64,
     /// Visual category for colour coding.
     pub kind: ActivityKind,
 }
@@ -53,8 +51,6 @@ pub enum ActivityKind {
     Exec,
     /// fork / vfork / clone.
     Fork,
-    /// Anything else that doesn't fit a known pattern.
-    Other,
 }
 
 // ── internal state ────────────────────────────────────────────────────────────
@@ -298,7 +294,6 @@ impl Explainer {
                         pid,
                         comm: comm_to_string(&event.comm),
                         summary: format!("EXEC {path}"),
-                        duration_ns: event.duration_ns(),
                         kind: ActivityKind::Exec,
                     }]
                 } else {
@@ -314,7 +309,6 @@ impl Explainer {
                         pid,
                         comm: comm_to_string(&event.comm),
                         summary: format!("FORK → child PID {ret}"),
-                        duration_ns: event.duration_ns(),
                         kind: ActivityKind::Fork,
                     }]
                 } else {
@@ -328,7 +322,6 @@ impl Explainer {
                         pid,
                         comm: comm_to_string(&event.comm),
                         summary: format!("CLONE → child PID {ret}"),
-                        duration_ns: event.duration_ns(),
                         kind: ActivityKind::Fork,
                     }]
                 } else {
@@ -385,7 +378,6 @@ impl Explainer {
                 pid,
                 comm: comm_to_string(&f.comm),
                 summary,
-                duration_ns: f.last_ns.saturating_sub(f.first_ns),
                 kind,
             });
         }
@@ -400,7 +392,6 @@ impl Explainer {
                 pid,
                 comm: comm_to_string(&s.comm),
                 summary,
-                duration_ns: s.last_ns.saturating_sub(s.first_ns),
                 kind: ActivityKind::Network,
             });
         }

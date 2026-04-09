@@ -60,8 +60,6 @@ enum TuiEvent {
         timestamp_ns: u64,
         duration_ns: u64,
         comm: String,
-        pid: u32,
-        tid: u32,
         name: &'static str,
         args_str: String,
         ret_str: String,
@@ -142,11 +140,6 @@ impl TuiApp {
         }
     }
 
-    /// Mark the target process as having exited.
-    pub fn set_exited(&mut self) {
-        self.target_exited = true;
-    }
-
     /// Push a new event into the application state.
     fn push(&mut self, event: &SyscallEvent) {
         self.total_events += 1;
@@ -206,8 +199,6 @@ impl TuiApp {
             timestamp_ns: event.enter_ns,
             duration_ns: event.duration_ns(),
             comm,
-            pid: event.pid,
-            tid: event.tid,
             name,
             args_str,
             ret_str,
