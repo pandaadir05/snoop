@@ -25,6 +25,8 @@ mod viewer;
 mod loader;
 #[cfg(target_os = "linux")]
 mod tracer;
+#[cfg(target_os = "linux")]
+mod uprobe;
 
 use anyhow::Result;
 

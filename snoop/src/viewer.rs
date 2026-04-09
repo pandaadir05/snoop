@@ -62,7 +62,7 @@ pub async fn run(path: &Path, filter: Filter, mode: OutputMode) -> Result<()> {
             });
 
             let app = TuiApp::new(filter, None);
-            app.run(rx, done_rx).await?;
+            app.run(rx, None, done_rx).await?;
         }
     }
 

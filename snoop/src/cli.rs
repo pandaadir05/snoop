@@ -11,6 +11,8 @@ use anyhow::{bail, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
 use crate::{filter::Filter, output::OutputMode};
+#[cfg(target_os = "linux")]
+use crate::uprobe::UprobeConfig;
 
 /// A modern syscall tracer for Linux, built on eBPF.
 #[derive(Debug, Parser)]
@@ -125,6 +127,20 @@ pub struct Cli {
     pub no_decode: bool,
 
     // ── advanced ───────────────────────────────────────────────────────────
+
+    /// Capture TLS plaintext via uprobes on `SSL_write` / `SSL_read`.
+    ///
+    /// Requires OpenSSL in the target process.  Shows decrypted payloads
+    /// inline in the event stream.
+    #[arg(long)]
+    pub tls: bool,
+
+    /// Trace `malloc` / `free` / `calloc` / `realloc` (ltrace mode).
+    ///
+    /// Attaches uprobes to libc allocation functions so heap activity
+    /// appears alongside syscalls.
+    #[arg(long)]
+    pub ltrace: bool,
 
     /// Write a flamegraph SVG to PATH when the trace ends.
     #[arg(long, value_name = "PATH")]
@@ -360,28 +376,29 @@ impl Cli {
                     let filter = self.build_filter();
                     let mode = self.output_mode();
                     let flamegraph = self.flamegraph;
+                    let uprobes = UprobeConfig { tls: self.tls, ltrace: self.ltrace };
 
                     if let Some(name) = self.docker {
                         let pid = crate::container::resolve_docker(&name)?;
                         crate::tracer::attach(
-                            pid, true, filter, mode, flamegraph, self.ebpf_obj,
+                            pid, true, filter, mode, flamegraph, self.ebpf_obj, uprobes,
                         )
                         .await
                     } else if let Some(pod_name) = self.pod {
                         let pid =
                             crate::container::resolve_pod(&pod_name, &self.namespace)?;
                         crate::tracer::attach(
-                            pid, true, filter, mode, flamegraph, self.ebpf_obj,
+                            pid, true, filter, mode, flamegraph, self.ebpf_obj, uprobes,
                         )
                         .await
                     } else if let Some(pid) = self.pid {
                         crate::tracer::attach(
-                            pid, self.follow, filter, mode, flamegraph, self.ebpf_obj,
+                            pid, self.follow, filter, mode, flamegraph, self.ebpf_obj, uprobes,
                         )
                         .await
                     } else {
                         crate::tracer::spawn(
-                            &self.cmd, filter, mode, flamegraph, self.ebpf_obj,
+                            &self.cmd, filter, mode, flamegraph, self.ebpf_obj, uprobes,
                         )
                         .await
                     }

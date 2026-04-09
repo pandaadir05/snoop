@@ -37,17 +37,35 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState},
     Frame, Terminal,
 };
-use snoop_common::{SyscallEvent, SyscallNr};
+use snoop_common::{LibCallEvent, SyscallEvent, SyscallNr};
 use tokio::sync::mpsc;
 
 use crate::{
     decode::{comm_to_string, DecodedEvent},
     filter::Filter,
     flamegraph::FlamegraphCollector,
+    output::lib_call,
 };
 
 /// Maximum number of events kept in the scrollback buffer.
 const MAX_EVENTS: usize = 10_000;
+
+/// A single display entry in the TUI event stream.
+///
+/// Either a decoded syscall or a library-call captured via uprobe.
+enum TuiEvent {
+    Syscall(DecodedEvent),
+    LibCall {
+        timestamp_ns: u64,
+        duration_ns: u64,
+        comm: String,
+        pid: u32,
+        tid: u32,
+        name: &'static str,
+        args_str: String,
+        ret_str: String,
+    },
+}
 
 /// Tick rate for the render loop.
 const TICK_MS: u64 = 16; // ~60 fps
@@ -56,7 +74,7 @@ const TICK_MS: u64 = 16; // ~60 fps
 pub struct TuiApp {
     filter: Filter,
     /// All events received since start (ring buffer, newest last).
-    events: Vec<DecodedEvent>,
+    events: Vec<TuiEvent>,
     /// Per-syscall call counts.
     counts: HashMap<&'static str, u64>,
     /// Total events received (including filtered-out ones).
@@ -149,9 +167,43 @@ impl TuiApp {
         if self.events.len() >= MAX_EVENTS {
             self.events.remove(0);
         }
-        self.events.push(decoded);
+        self.events.push(TuiEvent::Syscall(decoded));
 
         // Auto-scroll to bottom.
+        let len = self.events.len();
+        if len > 0 {
+            self.stream_state.select(Some(len - 1));
+        }
+    }
+
+    /// Push a library-call event (from uprobes) into the stream.
+    fn push_lib(&mut self, event: &LibCallEvent) {
+        if self.paused {
+            return;
+        }
+
+        let Some(func) = event.lib_func() else { return };
+        let name = lib_call::tui_name(func);
+        let args_str = lib_call::format_args(event);
+        let ret_str = lib_call::format_ret(event);
+        let comm = comm_to_string(&event.comm);
+
+        *self.counts.entry(name).or_insert(0) += 1;
+
+        if self.events.len() >= MAX_EVENTS {
+            self.events.remove(0);
+        }
+        self.events.push(TuiEvent::LibCall {
+            timestamp_ns: event.enter_ns,
+            duration_ns: event.duration_ns(),
+            comm,
+            pid: event.pid,
+            tid: event.tid,
+            name,
+            args_str,
+            ret_str,
+        });
+
         let len = self.events.len();
         if len > 0 {
             self.stream_state.select(Some(len - 1));
@@ -168,6 +220,7 @@ impl TuiApp {
     pub async fn run(
         mut self,
         mut rx: mpsc::Receiver<SyscallEvent>,
+        mut lib_rx: Option<mpsc::Receiver<LibCallEvent>>,
         mut done: tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<Option<FlamegraphCollector>> {
         // Set up the terminal.
@@ -177,7 +230,7 @@ impl TuiApp {
         let backend = CrosstermBackend::new(io::stderr());
         let mut terminal = Terminal::new(backend)?;
 
-        let result = self.event_loop(&mut terminal, &mut rx, &mut done).await;
+        let result = self.event_loop(&mut terminal, &mut rx, &mut lib_rx, &mut done).await;
 
         // Always restore the terminal, even on error.
         disable_raw_mode()?;
@@ -195,12 +248,13 @@ impl TuiApp {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stderr>>,
         rx: &mut mpsc::Receiver<SyscallEvent>,
+        lib_rx: &mut Option<mpsc::Receiver<LibCallEvent>>,
         done: &mut tokio::sync::watch::Receiver<bool>,
     ) -> anyhow::Result<()> {
         let tick = Duration::from_millis(TICK_MS);
 
         loop {
-            // Drain all pending events from the ring buffer consumer.
+            // Drain all pending syscall events.
             loop {
                 match rx.try_recv() {
                     Ok(ev) => {
@@ -210,6 +264,17 @@ impl TuiApp {
                     Err(mpsc::error::TryRecvError::Disconnected) => {
                         self.target_exited = true;
                         break;
+                    }
+                }
+            }
+
+            // Drain all pending lib-call events (uprobes).
+            if let Some(ref mut lrx) = lib_rx {
+                loop {
+                    match lrx.try_recv() {
+                        Ok(ev) => self.push_lib(&ev),
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => break,
                     }
                 }
             }
@@ -310,10 +375,11 @@ impl TuiApp {
                 }
             }
 
-            // Open detail popup for the currently selected event.
+            // Open detail popup for the currently selected syscall event.
+            // Lib-call events do not have a detail popup.
             KeyCode::Enter => {
                 if let Some(idx) = self.stream_state.selected() {
-                    if idx < self.events.len() {
+                    if matches!(self.events.get(idx), Some(TuiEvent::Syscall(_))) {
                         self.detail_idx = Some(idx);
                     }
                 }
@@ -386,7 +452,7 @@ impl TuiApp {
 
         // Detail popup overlays everything else.
         if let Some(idx) = self.detail_idx {
-            if let Some(ev) = self.events.get(idx) {
+            if let Some(TuiEvent::Syscall(ev)) = self.events.get(idx) {
                 render_detail_popup(f, area, ev);
             }
         }
@@ -454,38 +520,58 @@ impl TuiApp {
         let items: Vec<ListItem> = self
             .events
             .iter()
-            .map(|e| {
-                let duration_ms = e.duration_ns as f64 / 1_000_000.0;
-                let elapsed_s = e.timestamp_ns as f64 / 1_000_000_000.0;
-
-                let color = syscall_color(SyscallNr(
-                    // Re-resolve the nr from the name — slightly wasteful but
-                    // avoids storing it separately in DecodedEvent.
-                    name_to_nr(e.name),
-                ));
-
-                let name_span = Span::styled(e.name, Style::default().fg(color));
-                let line = Line::from(vec![
-                    Span::styled(
-                        format!("[{elapsed_s:>8.3}] "),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                    Span::styled(
-                        format!("{:<12} ", e.comm),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                    name_span,
-                    Span::raw(format!("({}) = {} ", e.args_str, e.ret_str)),
-                    Span::styled(
-                        format!("<{duration_ms:.3}ms>"),
-                        if duration_ms > 10.0 {
-                            Style::default().fg(Color::Red)
-                        } else {
-                            Style::default().fg(Color::DarkGray)
-                        },
-                    ),
-                ]);
-                ListItem::new(line)
+            .map(|entry| match entry {
+                TuiEvent::Syscall(e) => {
+                    let duration_ms = e.duration_ns as f64 / 1_000_000.0;
+                    let elapsed_s = e.timestamp_ns as f64 / 1_000_000_000.0;
+                    let color = syscall_color(SyscallNr(name_to_nr(e.name)));
+                    let line = Line::from(vec![
+                        Span::styled(
+                            format!("[{elapsed_s:>8.3}] "),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", e.comm),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                        Span::styled(e.name, Style::default().fg(color)),
+                        Span::raw(format!("({}) = {} ", e.args_str, e.ret_str)),
+                        Span::styled(
+                            format!("<{duration_ms:.3}ms>"),
+                            if duration_ms > 10.0 {
+                                Style::default().fg(Color::Red)
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            },
+                        ),
+                    ]);
+                    ListItem::new(line)
+                }
+                TuiEvent::LibCall { timestamp_ns, duration_ns, comm, name, args_str, ret_str, .. } => {
+                    let duration_ms = *duration_ns as f64 / 1_000_000.0;
+                    let elapsed_s = *timestamp_ns as f64 / 1_000_000_000.0;
+                    let line = Line::from(vec![
+                        Span::styled(
+                            format!("[{elapsed_s:>8.3}] "),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!("{:<12} ", comm),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                        Span::styled(*name, Style::default().fg(Color::Cyan)),
+                        Span::raw(format!("({args_str}) = {ret_str} ")),
+                        Span::styled(
+                            format!("<{duration_ms:.3}ms>"),
+                            if duration_ms > 10.0 {
+                                Style::default().fg(Color::Red)
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            },
+                        ),
+                    ]);
+                    ListItem::new(line)
+                }
             })
             .collect();
 
@@ -515,7 +601,12 @@ impl TuiApp {
                 } else {
                     0.0
                 };
-                let color = syscall_color(SyscallNr(name_to_nr(name)));
+                // Lib call names are bracketed (e.g. "[SSL_write]"); show them in cyan.
+                let color = if name.starts_with('[') {
+                    Color::Cyan
+                } else {
+                    syscall_color(SyscallNr(name_to_nr(name)))
+                };
                 Row::new(vec![
                     Cell::from(Span::styled(*name, Style::default().fg(color))),
                     Cell::from(format!("{count:>8}")),

@@ -7,7 +7,9 @@
 #![no_std]
 
 mod event;
+mod lib_event;
 mod syscall_nr;
 
 pub use event::{SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
+pub use lib_event::{LibCallEvent, LibFunc, TLS_DATA_MAX};
 pub use syscall_nr::SyscallNr;

@@ -2,6 +2,7 @@
 
 pub mod explain;
 pub mod json;
+pub mod lib_call;
 pub mod raw;
 pub mod tui;
 
