@@ -28,7 +28,8 @@ pub struct Cli {
     // ── trace mode (default when no subcommand given) ──────────────────────
 
     /// Attach to an existing process by PID.
-    #[arg(short = 'p', long, value_name = "PID", global = false)]
+    #[arg(short = 'p', long, value_name = "PID", global = false,
+          conflicts_with_all = ["docker", "pod"])]
     pub pid: Option<u32>,
 
     /// Also trace children spawned by the target process (`clone`/`fork`).
@@ -37,6 +38,31 @@ pub struct Cli {
     /// `snoop <cmd>`, the child is always traced.
     #[arg(long, requires = "pid")]
     pub follow: bool,
+
+    /// Attach to all processes inside a Docker container (name or ID).
+    ///
+    /// Automatically enables `--follow` so every process in the container
+    /// is traced.  Requires `docker` in `$PATH` (falls back to a
+    /// `/proc` cgroup scan when the Docker CLI is absent).
+    ///
+    /// Example: `sudo snoop --docker nginx`
+    #[arg(long, value_name = "NAME|ID", conflicts_with_all = ["pid", "pod"])]
+    pub docker: Option<String>,
+
+    /// Attach to all processes inside a Kubernetes pod.
+    ///
+    /// Automatically enables `--follow`.  Requires `kubectl` configured
+    /// to reach the target cluster.  Use `--namespace` to select a
+    /// non-default namespace.
+    ///
+    /// Example: `sudo snoop --pod my-app-pod --namespace production`
+    #[arg(long, value_name = "POD", conflicts_with_all = ["pid", "docker"])]
+    pub pod: Option<String>,
+
+    /// Kubernetes namespace for `--pod` (default: `"default"`).
+    #[arg(long, short = 'n', value_name = "NS", default_value = "default",
+          requires = "pod")]
+    pub namespace: String,
 
     /// Command to spawn and trace (everything after `--` or the first
     /// non-flag argument).
@@ -122,16 +148,34 @@ pub enum Command {
     #[command(group(
         ArgGroup::new("target")
             .required(true)
-            .args(["pid", "command"]),
+            .args(["pid", "command", "docker", "pod"]),
     ))]
     Record {
         /// Attach to an existing process by PID.
-        #[arg(short = 'p', long, value_name = "PID")]
+        #[arg(short = 'p', long, value_name = "PID",
+              conflicts_with_all = ["docker", "pod"])]
         pid: Option<u32>,
 
         /// Also trace children (`clone`/`fork`).
         #[arg(long, requires = "pid")]
         follow: bool,
+
+        /// Attach to all processes inside a Docker container (name or ID).
+        ///
+        /// Automatically enables `--follow`.
+        #[arg(long, value_name = "NAME|ID", conflicts_with_all = ["pid", "pod"])]
+        docker: Option<String>,
+
+        /// Attach to all processes inside a Kubernetes pod.
+        ///
+        /// Automatically enables `--follow`.
+        #[arg(long, value_name = "POD", conflicts_with_all = ["pid", "docker"])]
+        pod: Option<String>,
+
+        /// Kubernetes namespace for `--pod` (default: `"default"`).
+        #[arg(long, short = 'n', value_name = "NS", default_value = "default",
+              requires = "pod")]
+        namespace: String,
 
         /// Command to spawn and trace.
         #[arg(
@@ -257,6 +301,9 @@ impl Cli {
             Some(Command::Record {
                 pid,
                 follow,
+                docker,
+                pod,
+                namespace,
                 command,
                 output,
                 ebpf_obj,
@@ -267,7 +314,19 @@ impl Cli {
                 #[cfg(target_os = "linux")]
                 {
                     check_privileges()?;
-                    if let Some(pid) = pid {
+                    if let Some(name) = docker {
+                        let resolved = crate::container::resolve_docker(&name)?;
+                        return crate::tracer::record_attach(
+                            resolved, true, output, ebpf_obj,
+                        )
+                        .await;
+                    } else if let Some(pod_name) = pod {
+                        let resolved = crate::container::resolve_pod(&pod_name, &namespace)?;
+                        return crate::tracer::record_attach(
+                            resolved, true, output, ebpf_obj,
+                        )
+                        .await;
+                    } else if let Some(pid) = pid {
                         return crate::tracer::record_attach(
                             pid, follow, output, ebpf_obj,
                         )
@@ -279,14 +338,21 @@ impl Cli {
             }
 
             None => {
-                // Default trace mode — require either --pid or a command.
+                // Default trace mode — require one of: --pid, --docker, --pod, or CMD.
                 #[cfg(not(target_os = "linux"))]
                 bail!("snoop requires a Linux kernel (eBPF tracepoints are not available on this OS)");
 
                 #[cfg(target_os = "linux")]
                 {
-                    if self.pid.is_none() && self.cmd.is_empty() {
-                        bail!("specify a target: --pid <PID> or a command to run");
+                    if self.pid.is_none()
+                        && self.docker.is_none()
+                        && self.pod.is_none()
+                        && self.cmd.is_empty()
+                    {
+                        bail!(
+                            "specify a target: --pid <PID>, --docker <NAME>, \
+                             --pod <POD>, or a command to run"
+                        );
                     }
 
                     check_privileges()?;
@@ -295,7 +361,20 @@ impl Cli {
                     let mode = self.output_mode();
                     let flamegraph = self.flamegraph;
 
-                    if let Some(pid) = self.pid {
+                    if let Some(name) = self.docker {
+                        let pid = crate::container::resolve_docker(&name)?;
+                        crate::tracer::attach(
+                            pid, true, filter, mode, flamegraph, self.ebpf_obj,
+                        )
+                        .await
+                    } else if let Some(pod_name) = self.pod {
+                        let pid =
+                            crate::container::resolve_pod(&pod_name, &self.namespace)?;
+                        crate::tracer::attach(
+                            pid, true, filter, mode, flamegraph, self.ebpf_obj,
+                        )
+                        .await
+                    } else if let Some(pid) = self.pid {
                         crate::tracer::attach(
                             pid, self.follow, filter, mode, flamegraph, self.ebpf_obj,
                         )

@@ -10,6 +10,7 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 
 mod cli;
+mod container;
 mod decode;
 mod diff;
 mod error;
