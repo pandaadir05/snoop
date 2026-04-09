@@ -13,7 +13,6 @@ mod cli;
 mod container;
 mod decode;
 mod diff;
-mod error;
 mod explain;
 mod filter;
 mod flamegraph;
