@@ -113,7 +113,7 @@ mod tests {
             enter_ns: 1_000_000_000,
             exit_ns: 1_000_043_000,
             comm: *b"nginx\0\0\0\0\0\0\0\0\0\0\0",
-            path: [0; 128],
+            path: [0; snoop_common::PATH_MAX_LEN],
             path_len: 0,
             sockaddr: [0; 28],
             sockaddr_len: 0,

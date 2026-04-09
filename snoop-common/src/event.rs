@@ -1,9 +1,13 @@
 //! Wire types that cross the eBPF/userspace boundary.
 
 /// Maximum bytes captured for a path or command-name string argument.
-/// Keeping this at 128 keeps the ring-buffer entry size comfortable for the
-/// BPF verifier (total SyscallEvent ≈ 280 bytes).
-pub const PATH_MAX_LEN: usize = 128;
+///
+/// 256 bytes covers nearly all real-world paths (Linux PATH_MAX is 4096, but
+/// executable and config paths are almost always under 200 chars).  The field
+/// lives in ring-buffer memory, not on the BPF stack, so size is not a
+/// verifier concern.  Total SyscallEvent ≈ 408 bytes, well under the ring
+/// buffer's 4 MiB capacity.
+pub const PATH_MAX_LEN: usize = 256;
 
 /// Raw bytes of a `struct sockaddr` — enough for IPv4, IPv6, and UNIX.
 /// IPv4 sockaddr_in  = 16 bytes

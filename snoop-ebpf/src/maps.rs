@@ -13,7 +13,7 @@ use snoop_common::{
 
 /// Ring buffer used to forward completed `SyscallEvent`s to userspace.
 ///
-/// 4 MiB is enough for ~17 000 outstanding events (each ~248 bytes) before
+/// 4 MiB is enough for ~10 000 outstanding events (each ~408 bytes) before
 /// the consumer stalls.  Userspace drains this in a tight async loop.
 #[map]
 pub(crate) static EVENTS: RingBuf = RingBuf::with_byte_size(4 * 1024 * 1024, 0);

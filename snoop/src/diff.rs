@@ -224,7 +224,7 @@ mod tests {
             enter_ns: 1000,
             exit_ns: 1000 + duration_ns,
             comm: [0; 16],
-            path: [0; 128],
+            path: [0; snoop_common::PATH_MAX_LEN],
             path_len: 0,
             sockaddr: [0; 28],
             sockaddr_len: 0,
