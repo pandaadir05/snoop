@@ -79,6 +79,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ebpf-
 
+      - name: Install LLVM
+        run: sudo apt-get install -y llvm-dev
+
       - name: Install bpf-linker
         run: cargo install bpf-linker --no-default-features
 
@@ -108,7 +111,7 @@ jobs:
       - name: Install cross-compilation tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools llvm-dev
 
       - name: Install bpf-linker
         run: cargo install bpf-linker --no-default-features
