@@ -80,9 +80,11 @@ jobs:
             ${{ runner.os }}-ebpf-
 
       - name: Install LLVM
-        run: sudo apt-get install -y llvm-dev
+        run: sudo apt-get install -y llvm-18-dev libllvm18
 
       - name: Install bpf-linker
+        env:
+          LLVM_PREFIX: /usr/lib/llvm-18
         run: cargo install bpf-linker --no-default-features
 
       - name: Compile eBPF programs
@@ -111,9 +113,11 @@ jobs:
       - name: Install cross-compilation tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools llvm-dev
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools llvm-18-dev libllvm18
 
       - name: Install bpf-linker
+        env:
+          LLVM_PREFIX: /usr/lib/llvm-18
         run: cargo install bpf-linker --no-default-features
 
       - name: Cache
