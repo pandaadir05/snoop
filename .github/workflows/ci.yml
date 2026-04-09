@@ -79,13 +79,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ebpf-
 
-      - name: Install LLVM
-        run: sudo apt-get install -y llvm-18-dev libllvm18
+      # bpf-linker bundles its own LLVM to avoid a system LLVM version
+      # dependency.  Cache the compiled binary so it is only built once.
+      - name: Cache bpf-linker binary
+        id: cache-bpf-linker
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/bpf-linker
+          key: bpf-linker-${{ runner.os }}-0.10.2
 
       - name: Install bpf-linker
-        env:
-          LLVM_PREFIX: /usr/lib/llvm-18
-        run: cargo install bpf-linker --no-default-features
+        if: steps.cache-bpf-linker.outputs.cache-hit != 'true'
+        run: cargo install bpf-linker
 
       - name: Compile eBPF programs
         run: cargo xtask build-ebpf
@@ -113,12 +118,20 @@ jobs:
       - name: Install cross-compilation tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools llvm-18-dev libllvm18
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+
+      # bpf-linker bundles its own LLVM to avoid a system LLVM version
+      # dependency.  Cache the compiled binary so it is only built once.
+      - name: Cache bpf-linker binary
+        id: cache-bpf-linker
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/bpf-linker
+          key: bpf-linker-${{ runner.os }}-0.10.2
 
       - name: Install bpf-linker
-        env:
-          LLVM_PREFIX: /usr/lib/llvm-18
-        run: cargo install bpf-linker --no-default-features
+        if: steps.cache-bpf-linker.outputs.cache-hit != 'true'
+        run: cargo install bpf-linker
 
       - name: Cache
         uses: actions/cache@v4
