@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-04-09 — Polish pass: correctness fixes and new features
+
+**What changed:**
+- Fixed spawn-mode race condition (`snoop <cmd>`) via `ptrace(PTRACE_TRACEME)` in a pre-exec hook. The child now stops at exec entry; the parent loads eBPF while the child is frozen, then detaches ptrace. Every syscall from the very first `execve` is now captured.
+- Increased `PATH_MAX_LEN` from 128 → 256 bytes. Paths in deep directory hierarchies or with long filenames were previously silently truncated.
+- Added `--count` mode (like `strace -c`). Accumulates per-syscall count, error count, and timing stats across the whole trace; prints a sorted table on exit. Works for live traces and `snoop view`.
+- CI fix: `cargo fmt` reformatting across 24 files; removed unneeded `return` and useless `Into` conversion in `cli.rs`; replaced explicit copy closures with `.copied()` in `diff.rs`.
+
+**Decisions:**
+- ptrace detach (`PTRACE_DETACH`) is used rather than `PTRACE_CONT` so no ptrace overhead remains after eBPF is loaded.
+- `--count` does not show per-call output while running, matching `strace -c` behaviour; combine with filters (`--files`, `--slow`) to narrow the table.
+
 ## 2026-04-09 — Uprobe / TLS tracing + CLI wiring
 
 **What changed:**

@@ -69,13 +69,11 @@
 - [x] Kernel-side PID filtering — sys_enter drops non-target events before they reach the ring buffer
 - [x] aarch64 CI job (cross-compile check + eBPF bpf{el,eb}-unknown-none jobs)
 
-## Technical debt / known limitations
+## v0.3 — Quality of life
 
-- Spawn mode has an inherent race: eBPF attaches after exec, so the very first
-  few syscalls of a process may be missed. Fix: use `ptrace(PTRACE_TRACEME)`
-  to stall the child until eBPF is loaded.
-- Argument decoding for pointer-heavy syscalls (execve argv, sendmsg iov) reads
-  from userspace via `bpf_probe_read_user`; long strings are truncated at 128 bytes.
-- No kernel-side PID filter yet — all syscalls are forwarded to userspace and
-  filtered there. High-frequency workloads may saturate the ring buffer.
-- accept/accept4/getpeername/getsockname now also capture sockaddr via SOCKADDR_BUF.
+- [x] Fix spawn-mode race: hold child with `ptrace(PTRACE_TRACEME)` until eBPF loads
+- [x] Increase `PATH_MAX_LEN` 128 → 256 bytes (covers deep/long paths)
+- [x] `--count` mode: per-syscall summary table on exit (like `strace -c`)
+- [ ] Argument string truncation still occurs at 256 bytes for truly long paths
+- [ ] execve argv / sendmsg iov: only first argument string is captured
+- [ ] `--output-file`: tee raw/JSON output to a file while the TUI runs
