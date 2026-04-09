@@ -1,5 +1,23 @@
 # DEVLOG
 
+## 2026-04-09 — Uprobe / TLS tracing + CLI wiring
+
+**What changed:**
+- Added `snoop-common/src/lib_event.rs`: `LibCallEvent` wire type (`#[repr(C)]`, 364 bytes) and `LibFunc` enum for identifying which library function fired.
+- Added `snoop-ebpf/src/programs/uprobes.rs`: eight uprobe/uretprobe eBPF programs — `ssl_write_enter/exit`, `ssl_read_enter/exit` (TLS plaintext capture) and `ltrace_malloc/free/calloc/realloc` entry/return pairs. SSL data is read via a per-CPU scratch buffer (`TLS_BUF`) to stay within the 512-byte eBPF stack limit. ltrace programs encode the function discriminant in the high byte of the `LTRACE_ENTER` key to allow multiple functions on the same thread simultaneously.
+- Extended `snoop-ebpf/src/maps.rs` with `LIB_EVENTS` ring buffer (2 MiB), `SSL_ENTER`/`LTRACE_ENTER` hash maps (scratch storage across enter/exit boundary), and `TLS_BUF` per-CPU array.
+- Added `snoop/src/uprobe.rs`: `UprobeConfig` struct, `attach_uprobes()` which locates libssl/libc via `/proc/<pid>/maps` and attaches programs with aya, plus `find_library()` helper.
+- Added `snoop/src/output/lib_call.rs`: `format_raw()` / `write_raw()` / `write_json()` for `LibCallEvent`; `tui_name()` returns bracketed names like `[SSL_write]` for TUI display.
+- Extended `snoop/src/tracer.rs`: `take_lib_channel()` uses `ebpf.take_map("LIB_EVENTS")` (aya 0.13 owned `MapData`) to extract the ring buffer without lifetime ties to the `Ebpf` handle; `consume_lib_ring_buf()` forwards events over mpsc; `opt_recv()` helper parks forever via `std::future::pending()` when no lib channel exists, enabling clean optional `tokio::select!` branches; all `run_*` functions accept and drain the optional `lib_rx`.
+- Extended `snoop/src/output/tui.rs`: added `TuiEvent` enum (Syscall/LibCall variants); TUI now drains `lib_rx` each tick and displays library calls inline in the stream with cyan coloring and `[func]` bracket notation; `--tls`/`--ltrace` entries appear in the top-syscalls panel.
+- Added `--tls` and `--ltrace` flags to `snoop/src/cli.rs`; both build a `UprobeConfig` passed to `tracer::attach` / `tracer::spawn`.
+
+**Decisions:**
+- Separate `LIB_EVENTS` ring buffer (not merged with `EVENTS`) so high-frequency TLS or malloc traffic cannot starve syscall events.
+- `Ebpf::take_map()` is the correct aya 0.13 API for extracting an owned ring buffer — avoids the borrow-tie problem that would prevent moving `ebpf` to `consume_ring_buf` while also having a `&mut` ring buffer.
+- ltrace programs are separate eBPF programs per function (not a single generic program) because `bpf_get_attach_cookie` requires kernel 5.15+ and we target 5.8+.
+- Detail popup in TUI is intentionally skipped for lib-call entries (they have no decoded args tree to display).
+
 ## 2026-04-07 — Scaffolding session
 
 **What changed:**
@@ -212,3 +230,72 @@
   `FOLLOW_MODE == 0`, so the cost in the common case is one map lookup and branch.
 
 **State:** `cargo build` ✓  `cargo test` ✓  (10 tests pass, 0 warnings)
+
+## 2026-04-08 — Explain mode
+
+Added `--explain` / `snoop view --explain` flag that replaces per-syscall lines with
+higher-level activity summaries.
+
+**New files:**
+- `snoop/src/explain.rs` — `Explainer` state machine:  tracks `(pid, fd)` → `OpenFile`
+  and `(pid, fd)` → `Socket` maps.  On `close`, emits a one-line activity.  On `execve`/
+  `fork`/`clone`, emits immediately.  `flush()` surfaces unclosed fds at end-of-trace.
+  Open+close with zero bytes is silently suppressed to avoid noise.
+- `snoop/src/output/explain.rs` — `ExplainOutput` wraps `Explainer`, applies the normal
+  `Filter`, and writes formatted lines to stdout.
+
+**Changed files:**
+- `output/mod.rs` — new `OutputMode::Explain` variant.
+- `cli.rs` — `--explain` flag on both trace mode and `snoop view`.  Conflicts with
+  `--json` and `--raw`.
+- `tracer.rs` — `run_explain` async function; dispatched from `run_output`.
+- `viewer.rs` — synchronous explain path for recorded files.
+- `main.rs` — registers the `explain` module.
+
+**Decisions:**
+- Explain mode is a *streaming post-processor*, not a separate pass; it works live and
+  on recorded files identically.
+- `dup`/`dup2`/`dup3` propagate state so bytes tracked on a duped fd are attributed to
+  the original path / peer.
+- Fds that had zero I/O are silently dropped (no "opened /proc/stat and closed it"
+  noise).
+- `flush()` at end-of-trace surfaces anything not explicitly closed (long-lived
+  connections, piped fds, etc.).
+
+**State:** `cargo build` ✓  `cargo test` ✓  (34 tests pass, 0 warnings)
+
+## 2026-04-08 — Container / Kubernetes awareness
+
+Added `--docker` and `--pod` target selectors so snoop can attach to containers
+without manually looking up host PIDs.
+
+**New file:**
+- `snoop/src/container.rs` — two public functions:
+  - `resolve_docker(name) -> Result<u32>` — runs `docker inspect --format={{.State.Pid}}`
+    to get the container's root PID; falls back to a `/proc/<pid>/cgroup` scan when
+    the Docker CLI is absent (containerd-only hosts, etc.).
+  - `resolve_pod(pod, namespace) -> Result<u32>` — runs `kubectl get pod … -o jsonpath`
+    to obtain the container ID, strips the runtime prefix (`docker://`, `containerd://`,
+    `cri-o://`), then scans `/proc/*/cgroup` for the lowest-numbered matching PID.
+    No `crictl` or runtime-specific CLI required.
+  - `find_pid_by_cgroup(short_id)` — shared scanner; returns the root (lowest PID)
+    process whose cgroup path contains the container ID.
+
+**Changed files:**
+- `cli.rs` — new `--docker <NAME|ID>`, `--pod <POD>`, `--namespace/-n <NS>` flags on
+  both the default trace mode and the `Record` subcommand.  All three targets
+  auto-enable `--follow`.  Conflicts enforced via clap `conflicts_with_all`.
+  `Record`'s `ArgGroup` expanded to include `docker` and `pod`.
+- `main.rs` — registers the `container` module.
+
+**Decisions:**
+- Both `--docker` and `--pod` hardcode `follow = true`: users targeting a container
+  almost always want the entire process tree traced.
+- The `/proc` cgroup scan uses the first 12 chars of the container ID (standard
+  short-form) — unambiguous in practice and consistent with how runtimes write cgroup paths.
+- `--namespace` defaults to `"default"` (the Kubernetes default) and is a no-op when
+  `--pod` is not given (enforced by `requires = "pod"`).
+- No runtime version detection: the cgroup scan works uniformly across Docker,
+  containerd, and CRI-O without snoop needing to know which is in use.
+
+**State:** `cargo build` ✓  `cargo test` ✓  (40 tests pass, 0 warnings)

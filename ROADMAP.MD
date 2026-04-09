@@ -61,11 +61,11 @@
 - [x] Record & replay: `snoop record -p PID -o trace.snoop`, `snoop view trace.snoop`
 - [x] JSON output: `--json` (JSON Lines, pipe to jq)
 - [x] sockaddr decode: connect/bind show `127.0.0.1:8080` instead of raw pointer
-- [ ] "Explain" mode: semantic grouping (HTTP GET, config load, etc.)
+- [x] "Explain" mode: semantic grouping — `--explain` groups open/read/close, socket I/O, execve, fork into one-liner activities
 - [x] Diff mode: `snoop diff a.snoop b.snoop`
-- [ ] Container / Kubernetes awareness (`--docker`, `--pod`)
-- [ ] uprobe-based library-call tracing (absorb ltrace)
-- [ ] TLS decryption via uprobes on `SSL_write` / `SSL_read`
+- [x] Container / Kubernetes awareness (`--docker <name|id>`, `--pod <pod> [-n <namespace>]`)
+- [x] uprobe-based library-call tracing (absorb ltrace) — `--ltrace` traces malloc/free/calloc/realloc
+- [x] TLS decryption via uprobes on `SSL_write` / `SSL_read` — `--tls` captures plaintext inline
 - [x] Kernel-side PID filtering — sys_enter drops non-target events before they reach the ring buffer
 - [x] aarch64 CI job (cross-compile check + eBPF bpf{el,eb}-unknown-none jobs)
 
