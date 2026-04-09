@@ -16,6 +16,12 @@ jobs:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
 
+    # Skip the nightly eBPF build in this job — only stable toolchain is
+    # installed here.  build.rs writes an empty stub when this is set so
+    # that loader.rs can include_bytes! without failing.
+    env:
+      SNOOP_SKIP_EBPF_BUILD: "1"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -47,22 +53,20 @@ jobs:
 
   # ── eBPF compilation check ─────────────────────────────────────────────────
   ebpf:
-    name: eBPF compile (${{ matrix.target }})
+    name: eBPF compile (bpfel-unknown-none)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - bpfel-unknown-none   # little-endian (x86_64, aarch64)
-          - bpfeb-unknown-none   # big-endian (s390x, mips)
 
     steps:
       - uses: actions/checkout@v4
 
+      # BPF targets (bpfel-unknown-none) never ship pre-built rust-std — they
+      # are always compiled from source with -Z build-std=core.  Only rust-src
+      # is needed; do NOT add `targets:` here or rustup will fail trying to
+      # download a component that does not exist.
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-          targets: ${{ matrix.target }}
 
       - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
@@ -71,9 +75,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target/
-          key: ${{ runner.os }}-ebpf-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-ebpf-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-ebpf-${{ matrix.target }}-
+            ${{ runner.os }}-ebpf-
 
       - name: Install bpf-linker
         run: cargo install bpf-linker --no-default-features
@@ -94,11 +98,12 @@ jobs:
         with:
           targets: aarch64-unknown-linux-musl
 
+      # Same note as the ebpf job: BPF targets use -Z build-std=core, so only
+      # rust-src is required — no `targets:` field.
       - name: Install Rust nightly (for eBPF)
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-          targets: bpfel-unknown-none,bpfeb-unknown-none
 
       - name: Install cross-compilation tools
         run: |

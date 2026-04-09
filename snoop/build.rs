@@ -33,13 +33,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // CARGO_CFG_TARGET_OS is set by Cargo to the target OS (not the host OS),
     // so cross-compilation works correctly too.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
-        let packages = [aya_build::Package {
-            name: "snoop-ebpf",
-            root_dir: concat!(env!("CARGO_MANIFEST_DIR"), "/../snoop-ebpf"),
-            no_default_features: false,
-            features: &[],
-        }];
-        aya_build::build_ebpf(packages, aya_build::Toolchain::Nightly)?;
+        let out_dir = std::env::var("OUT_DIR")?;
+        let stub_path = std::path::Path::new(&out_dir).join("snoop-ebpf");
+
+        if std::env::var("SNOOP_SKIP_EBPF_BUILD").is_ok() {
+            // CI check / fmt / clippy jobs run on stable without nightly
+            // installed.  Write an empty stub so that loader.rs can compile
+            // (`include_bytes_aligned!` just needs the file to exist).
+            // The stub binary is never loaded at runtime in those jobs.
+            std::fs::write(&stub_path, b"")?;
+        } else {
+            println!("cargo:rerun-if-changed=../.git/HEAD");
+            println!("cargo:rerun-if-changed=../.git/refs");
+            println!(
+                "cargo:rerun-if-changed={}",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../snoop-ebpf")
+            );
+            let packages = [aya_build::Package {
+                name: "snoop-ebpf",
+                root_dir: concat!(env!("CARGO_MANIFEST_DIR"), "/../snoop-ebpf"),
+                no_default_features: false,
+                features: &[],
+            }];
+            aya_build::build_ebpf(packages, aya_build::Toolchain::Nightly)?;
+        }
     }
     Ok(())
 }

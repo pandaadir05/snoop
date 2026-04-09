@@ -29,11 +29,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # BPF targets use -Z build-std=core — only rust-src is needed.
       - name: Install Rust nightly (for eBPF compilation)
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
-          targets: bpfel-unknown-none,bpfeb-unknown-none
 
       - name: Install cross-compilation tools
         run: |
