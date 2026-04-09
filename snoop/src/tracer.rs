@@ -17,7 +17,8 @@ use crate::{
     flamegraph::FlamegraphCollector,
     loader,
     output::{
-        explain::ExplainOutput, json::JsonOutput, lib_call, raw::RawOutput, tui::TuiApp, OutputMode,
+        count::CountOutput, explain::ExplainOutput, json::JsonOutput, lib_call, raw::RawOutput,
+        tui::TuiApp, OutputMode,
     },
     record::TraceWriter,
     uprobe::UprobeConfig,
@@ -264,6 +265,7 @@ async fn run_output(
         OutputMode::Raw => run_raw(rx, lib_rx, done, filter, flamegraph).await,
         OutputMode::Json => run_json(rx, lib_rx, done, filter, flamegraph).await,
         OutputMode::Explain => run_explain(rx, lib_rx, done, filter, flamegraph).await,
+        OutputMode::Count => run_count(rx, done, filter, flamegraph).await,
         OutputMode::Tui => run_tui(rx, lib_rx, done, filter, flamegraph, target_pid).await,
     }
 }
@@ -410,6 +412,43 @@ async fn run_explain(
     }
 
     out.flush().context("write error")?;
+
+    if let (Some(collector), Some(path)) = (fg, flamegraph) {
+        collector.write_svg(&path)?;
+    }
+    Ok(())
+}
+
+// ── count output ─────────────────────────────────────────────────────────────
+
+async fn run_count(
+    mut rx: mpsc::Receiver<SyscallEvent>,
+    mut done: watch::Receiver<bool>,
+    filter: Filter,
+    flamegraph: Option<PathBuf>,
+) -> Result<()> {
+    let mut out = CountOutput::new(filter);
+    let mut fg = flamegraph.as_ref().map(|_| FlamegraphCollector::new());
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let Some(ref mut c) = fg { c.record(&event); }
+                out.handle(&event);
+            }
+            _ = done.changed() => {
+                if *done.borrow() {
+                    while let Ok(ev) = rx.try_recv() {
+                        if let Some(ref mut c) = fg { c.record(&ev); }
+                        out.handle(&ev);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    out.finish().context("write error")?;
 
     if let (Some(collector), Some(path)) = (fg, flamegraph) {
         collector.write_svg(&path)?;

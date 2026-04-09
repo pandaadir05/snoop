@@ -102,8 +102,23 @@ pub struct Cli {
     /// READ  /etc/passwd  ↓1.2 KB  (2 calls, 0.80ms)
     /// NET   127.0.0.1:8080  ↑512 B ↓4.0 KB  (18.20ms)
     /// ```
-    #[arg(long, conflicts_with_all = ["json", "raw"])]
+    #[arg(long, conflicts_with_all = ["json", "raw", "count"])]
     pub explain: bool,
+
+    /// Print a per-syscall count and timing summary on exit (like `strace -c`).
+    ///
+    /// No per-call output is shown while the trace runs.  On exit a table is
+    /// printed sorted by total time:
+    ///
+    /// ```text
+    /// % time     seconds  usecs/call     calls    errors  syscall
+    /// ------ ----------- ----------- --------- --------- ----------------
+    ///  72.14    0.001234         411         3              read
+    ///  22.10    0.000378         378         1              openat
+    ///   5.76    0.000098          98         1         1   connect
+    /// ```
+    #[arg(long, conflicts_with_all = ["json", "raw", "explain"])]
+    pub count: bool,
 
     // ── filtering ──────────────────────────────────────────────────────────
     /// Restrict output to file-system syscalls.
@@ -243,16 +258,20 @@ pub enum Command {
         file: PathBuf,
 
         /// Print strace-compatible one-line output instead of the TUI.
-        #[arg(long, conflicts_with_all = ["json", "explain"])]
+        #[arg(long, conflicts_with_all = ["json", "explain", "count"])]
         raw: bool,
 
         /// Emit one JSON object per syscall.
-        #[arg(long, conflicts_with_all = ["raw", "explain"])]
+        #[arg(long, conflicts_with_all = ["raw", "explain", "count"])]
         json: bool,
 
         /// Show high-level activity summaries (explain mode).
-        #[arg(long, conflicts_with_all = ["json", "raw"])]
+        #[arg(long, conflicts_with_all = ["json", "raw", "count"])]
         explain: bool,
+
+        /// Print a per-syscall count and timing summary (like `strace -c`).
+        #[arg(long, conflicts_with_all = ["json", "raw", "explain"])]
+        count: bool,
 
         /// Restrict output to file-system syscalls.
         #[arg(long, conflicts_with_all = ["net"])]
@@ -292,6 +311,7 @@ impl Cli {
                 raw,
                 json,
                 explain,
+                count,
                 files,
                 net,
                 slow,
@@ -311,6 +331,8 @@ impl Cli {
                 };
                 let mode = if json {
                     OutputMode::Json
+                } else if count {
+                    OutputMode::Count
                 } else if explain {
                     OutputMode::Explain
                 } else if raw || !is_tty() {
@@ -452,6 +474,8 @@ impl Cli {
     fn output_mode(&self) -> OutputMode {
         if self.json {
             OutputMode::Json
+        } else if self.count {
+            OutputMode::Count
         } else if self.explain {
             OutputMode::Explain
         } else if self.raw || !is_tty() {

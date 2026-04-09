@@ -1,5 +1,6 @@
 //! Output modes.
 
+pub mod count;
 pub mod explain;
 pub mod json;
 pub mod lib_call;
@@ -17,4 +18,6 @@ pub enum OutputMode {
     Json,
     /// High-level activity summaries (explain mode).
     Explain,
+    /// Accumulate counts and print a summary table at exit (like `strace -c`).
+    Count,
 }
