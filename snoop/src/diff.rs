@@ -17,10 +17,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::{
-    decode::syscall_name,
-    record::TraceReader,
-};
+use crate::{decode::syscall_name, record::TraceReader};
 use snoop_common::{SyscallEvent, SyscallNr};
 
 // ── data collection ───────────────────────────────────────────────────────────
@@ -44,7 +41,10 @@ impl Profile {
     }
 
     fn count(&self, name: &str) -> u64 {
-        self.durations.get(name).map(|v| v.len() as u64).unwrap_or(0)
+        self.durations
+            .get(name)
+            .map(|v| v.len() as u64)
+            .unwrap_or(0)
     }
 
     fn median_ns(&self, name: &str) -> u64 {
@@ -82,23 +82,19 @@ pub fn run(path_a: &Path, path_b: &Path) -> Result<()> {
     let mut out = stdout.lock();
 
     writeln!(out, "snoop diff")?;
-    writeln!(
-        out,
-        "  a: {} ({} events)",
-        path_a.display(), pa.total
-    )?;
-    writeln!(
-        out,
-        "  b: {} ({} events)",
-        path_b.display(), pb.total
-    )?;
+    writeln!(out, "  a: {} ({} events)", path_a.display(), pa.total)?;
+    writeln!(out, "  b: {} ({} events)", path_b.display(), pb.total)?;
     writeln!(out)?;
 
     // Collect all syscall names seen in either trace.
     let mut all_names: Vec<&'static str> = {
         let mut s: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
-        for n in pa.syscall_names() { s.insert(n); }
-        for n in pb.syscall_names() { s.insert(n); }
+        for n in pa.syscall_names() {
+            s.insert(n);
+        }
+        for n in pb.syscall_names() {
+            s.insert(n);
+        }
         let mut v: Vec<_> = s.into_iter().collect();
         v.sort_unstable();
         v
@@ -106,7 +102,11 @@ pub fn run(path_a: &Path, path_b: &Path) -> Result<()> {
 
     // ── count changes ──────────────────────────────────────────────────────
     writeln!(out, "CALL COUNTS")?;
-    writeln!(out, "{:<20} {:>10} {:>10} {:>10}", "syscall", "a", "b", "delta")?;
+    writeln!(
+        out,
+        "{:<20} {:>10} {:>10} {:>10}",
+        "syscall", "a", "b", "delta"
+    )?;
     writeln!(out, "{}", "─".repeat(54))?;
 
     // Sort by absolute delta descending for relevance.
@@ -124,11 +124,7 @@ pub fn run(path_a: &Path, path_b: &Path) -> Result<()> {
             continue; // skip unchanged
         }
         let delta = cb as i64 - ca as i64;
-        writeln!(
-            out,
-            "{:<20} {:>10} {:>10} {:>+10}",
-            name, ca, cb, delta,
-        )?;
+        writeln!(out, "{:<20} {:>10} {:>10} {:>+10}", name, ca, cb, delta,)?;
         printed_counts += 1;
     }
     if printed_counts == 0 {
@@ -161,7 +157,11 @@ pub fn run(path_a: &Path, path_b: &Path) -> Result<()> {
         .collect();
 
     // Sort by absolute delta descending.
-    dur_rows.sort_by(|a, b| b.3.abs().partial_cmp(&a.3.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    dur_rows.sort_by(|a, b| {
+        b.3.abs()
+            .partial_cmp(&a.3.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     if dur_rows.is_empty() {
         writeln!(out, "  (no significant duration changes)")?;
@@ -180,7 +180,7 @@ pub fn run(path_a: &Path, path_b: &Path) -> Result<()> {
     let only_a: Vec<&str> = all_names
         .iter()
         .filter(|&&n| pa.count(n) > 0 && pb.count(n) == 0)
-        .map(|&n| n)
+        .copied()
         .collect();
     if !only_a.is_empty() {
         writeln!(out, "ONLY IN a")?;
@@ -194,7 +194,7 @@ pub fn run(path_a: &Path, path_b: &Path) -> Result<()> {
     let only_b: Vec<&str> = all_names
         .iter()
         .filter(|&&n| pb.count(n) > 0 && pa.count(n) == 0)
-        .map(|&n| n)
+        .copied()
         .collect();
     if !only_b.is_empty() {
         writeln!(out, "ONLY IN b")?;
@@ -214,15 +214,20 @@ mod tests {
 
     fn make_event(syscall_nr: i64, duration_ns: u64) -> SyscallEvent {
         SyscallEvent {
-            pid: 1, tid: 1, uid: 0, gid: 0,
+            pid: 1,
+            tid: 1,
+            uid: 0,
+            gid: 0,
             syscall_nr,
             args: [0; 6],
             ret: 0,
             enter_ns: 1000,
             exit_ns: 1000 + duration_ns,
             comm: [0; 16],
-            path: [0; 128], path_len: 0,
-            sockaddr: [0; 28], sockaddr_len: 0,
+            path: [0; 128],
+            path_len: 0,
+            sockaddr: [0; 28],
+            sockaddr_len: 0,
             _pad: [0; 5],
         }
     }
@@ -249,13 +254,17 @@ mod tests {
         let pb = dir.path().join("b.snoop");
 
         let mut wa = crate::record::TraceWriter::create(&pa).unwrap();
-        wa.write_event(&make_event(SyscallNr::READ.0, 1_000)).unwrap();
-        wa.write_event(&make_event(SyscallNr::OPENAT.0, 2_000)).unwrap();
+        wa.write_event(&make_event(SyscallNr::READ.0, 1_000))
+            .unwrap();
+        wa.write_event(&make_event(SyscallNr::OPENAT.0, 2_000))
+            .unwrap();
         wa.finish().unwrap();
 
         let mut wb = crate::record::TraceWriter::create(&pb).unwrap();
-        wb.write_event(&make_event(SyscallNr::READ.0, 5_000)).unwrap();
-        wb.write_event(&make_event(SyscallNr::WRITE.0, 1_000)).unwrap();
+        wb.write_event(&make_event(SyscallNr::READ.0, 5_000))
+            .unwrap();
+        wb.write_event(&make_event(SyscallNr::WRITE.0, 1_000))
+            .unwrap();
         wb.finish().unwrap();
 
         // Should not panic and should produce output.

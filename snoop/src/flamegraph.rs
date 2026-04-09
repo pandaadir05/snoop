@@ -40,8 +40,7 @@ impl FlamegraphCollector {
         }
         let comm = comm_to_string(&event.comm);
         let name = syscall_name(SyscallNr(event.syscall_nr));
-        self.lines
-            .push(format!("{comm};{name} {duration}\n"));
+        self.lines.push(format!("{comm};{name} {duration}\n"));
     }
 
     /// Render the accumulated entries to an SVG flamegraph at `path`.

@@ -166,7 +166,10 @@ mod tests {
 
     #[test]
     fn files_filter_rejects_network() {
-        let f = Filter { category_files: true, ..open_filter() };
+        let f = Filter {
+            category_files: true,
+            ..open_filter()
+        };
         assert!(f.accepts(&make_event(SyscallNr::OPENAT.0, 100)));
         assert!(!f.accepts(&make_event(SyscallNr::CONNECT.0, 100)));
     }

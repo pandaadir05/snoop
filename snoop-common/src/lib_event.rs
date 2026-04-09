@@ -42,11 +42,11 @@ impl LibFunc {
     pub fn name(self) -> &'static str {
         match self {
             Self::SslWrite => "SSL_write",
-            Self::SslRead  => "SSL_read",
-            Self::Malloc   => "malloc",
-            Self::Free     => "free",
-            Self::Calloc   => "calloc",
-            Self::Realloc  => "realloc",
+            Self::SslRead => "SSL_read",
+            Self::Malloc => "malloc",
+            Self::Free => "free",
+            Self::Calloc => "calloc",
+            Self::Realloc => "realloc",
         }
     }
 }

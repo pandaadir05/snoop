@@ -92,7 +92,9 @@ fn build_ebpf(release: bool) -> Result<()> {
     // are invalid for the BPF target.
     cmd.env_remove("RUSTFLAGS");
 
-    let status = cmd.status().context("failed to spawn `cargo +nightly build`")?;
+    let status = cmd
+        .status()
+        .context("failed to spawn `cargo +nightly build`")?;
     check_status(status, "cargo build (ebpf)")
 }
 
@@ -130,10 +132,7 @@ fn check_status(status: ExitStatus, what: &str) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        bail!(
-            "{what} exited with {}",
-            status.code().unwrap_or(-1)
-        )
+        bail!("{what} exited with {}", status.code().unwrap_or(-1))
     }
 }
 

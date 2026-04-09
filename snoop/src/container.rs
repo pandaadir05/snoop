@@ -172,8 +172,7 @@ fn find_pid_by_cgroup(id: &str) -> Result<u32> {
 
     let mut best: Option<u32> = None;
 
-    let entries = std::fs::read_dir("/proc")
-        .context("could not read /proc — is this Linux?")?;
+    let entries = std::fs::read_dir("/proc").context("could not read /proc — is this Linux?")?;
 
     for entry in entries.flatten() {
         let name = entry.file_name();
@@ -201,9 +200,7 @@ fn find_pid_by_cgroup(id: &str) -> Result<u32> {
     }
 
     best.ok_or_else(|| {
-        anyhow::anyhow!(
-            "no process found with container ID {id:?} in /proc cgroup entries"
-        )
+        anyhow::anyhow!("no process found with container ID {id:?} in /proc cgroup entries")
     })
 }
 

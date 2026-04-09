@@ -141,15 +141,33 @@ fn open_flags(flags: u64) -> String {
         2 => parts.push("O_RDWR"),
         _ => parts.push("O_RDWR"),
     }
-    if f & 0o100 != 0 { parts.push("O_CREAT"); }
-    if f & 0o200 != 0 { parts.push("O_EXCL"); }
-    if f & 0o400 != 0 { parts.push("O_NOCTTY"); }
-    if f & 0o1000 != 0 { parts.push("O_TRUNC"); }
-    if f & 0o2000 != 0 { parts.push("O_APPEND"); }
-    if f & 0o4000 != 0 { parts.push("O_NONBLOCK"); }
-    if f & 0o40000 != 0 { parts.push("O_DIRECTORY"); }
-    if f & 0o100000 != 0 { parts.push("O_NOFOLLOW"); }
-    if f & 0o2000000 != 0 { parts.push("O_CLOEXEC"); }
+    if f & 0o100 != 0 {
+        parts.push("O_CREAT");
+    }
+    if f & 0o200 != 0 {
+        parts.push("O_EXCL");
+    }
+    if f & 0o400 != 0 {
+        parts.push("O_NOCTTY");
+    }
+    if f & 0o1000 != 0 {
+        parts.push("O_TRUNC");
+    }
+    if f & 0o2000 != 0 {
+        parts.push("O_APPEND");
+    }
+    if f & 0o4000 != 0 {
+        parts.push("O_NONBLOCK");
+    }
+    if f & 0o40000 != 0 {
+        parts.push("O_DIRECTORY");
+    }
+    if f & 0o100000 != 0 {
+        parts.push("O_NOFOLLOW");
+    }
+    if f & 0o2000000 != 0 {
+        parts.push("O_CLOEXEC");
+    }
     if parts.is_empty() {
         format!("{flags:#o}")
     } else {
@@ -158,24 +176,50 @@ fn open_flags(flags: u64) -> String {
 }
 
 fn prot_flags(prot: u64) -> String {
-    if prot == 0 { return "PROT_NONE".to_owned(); }
+    if prot == 0 {
+        return "PROT_NONE".to_owned();
+    }
     let mut parts: Vec<&str> = Vec::new();
-    if prot & 1 != 0 { parts.push("PROT_READ"); }
-    if prot & 2 != 0 { parts.push("PROT_WRITE"); }
-    if prot & 4 != 0 { parts.push("PROT_EXEC"); }
+    if prot & 1 != 0 {
+        parts.push("PROT_READ");
+    }
+    if prot & 2 != 0 {
+        parts.push("PROT_WRITE");
+    }
+    if prot & 4 != 0 {
+        parts.push("PROT_EXEC");
+    }
     parts.join("|")
 }
 
 fn mmap_flags(flags: u64) -> String {
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 0x01 != 0 { parts.push("MAP_SHARED"); }
-    if flags & 0x02 != 0 { parts.push("MAP_PRIVATE"); }
-    if flags & 0x20 != 0 { parts.push("MAP_ANONYMOUS"); }
-    if flags & 0x10 != 0 { parts.push("MAP_FIXED"); }
-    if flags & 0x100 != 0 { parts.push("MAP_GROWSDOWN"); }
-    if flags & 0x800 != 0 { parts.push("MAP_NORESERVE"); }
-    if flags & 0x4000 != 0 { parts.push("MAP_POPULATE"); }
-    if parts.is_empty() { format!("{flags:#x}") } else { parts.join("|") }
+    if flags & 0x01 != 0 {
+        parts.push("MAP_SHARED");
+    }
+    if flags & 0x02 != 0 {
+        parts.push("MAP_PRIVATE");
+    }
+    if flags & 0x20 != 0 {
+        parts.push("MAP_ANONYMOUS");
+    }
+    if flags & 0x10 != 0 {
+        parts.push("MAP_FIXED");
+    }
+    if flags & 0x100 != 0 {
+        parts.push("MAP_GROWSDOWN");
+    }
+    if flags & 0x800 != 0 {
+        parts.push("MAP_NORESERVE");
+    }
+    if flags & 0x4000 != 0 {
+        parts.push("MAP_POPULATE");
+    }
+    if parts.is_empty() {
+        format!("{flags:#x}")
+    } else {
+        parts.join("|")
+    }
 }
 
 fn socket_domain(d: u64) -> &'static str {
@@ -199,8 +243,12 @@ fn socket_type(t: u64) -> String {
         _ => "SOCK_?",
     };
     let mut flags = String::new();
-    if t & 0o4000 != 0 { flags.push_str("|SOCK_NONBLOCK"); }
-    if t & 0o2000000 != 0 { flags.push_str("|SOCK_CLOEXEC"); }
+    if t & 0o4000 != 0 {
+        flags.push_str("|SOCK_NONBLOCK");
+    }
+    if t & 0o2000000 != 0 {
+        flags.push_str("|SOCK_CLOEXEC");
+    }
     format!("{base}{flags}")
 }
 
@@ -239,7 +287,12 @@ fn fmt_open(args: &[u64; 6], path: Option<&str>) -> String {
 }
 
 fn fmt_openat(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {}, {}", at_fd(args[0]), path_or_ptr(args[1], path), open_flags(args[2]))
+    format!(
+        "{}, {}, {}",
+        at_fd(args[0]),
+        path_or_ptr(args[1], path),
+        open_flags(args[2])
+    )
 }
 
 fn fmt_close(args: &[u64; 6]) -> String {
@@ -247,7 +300,13 @@ fn fmt_close(args: &[u64; 6]) -> String {
 }
 
 fn fmt_pread_pwrite(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {}", fd(args[0]), ptr(args[1]), args[2], args[3])
+    format!(
+        "{}, {}, {}, {}",
+        fd(args[0]),
+        ptr(args[1]),
+        args[2],
+        args[3]
+    )
 }
 
 fn fmt_lseek(args: &[u64; 6]) -> String {
@@ -269,7 +328,12 @@ fn fmt_fstat(args: &[u64; 6]) -> String {
 }
 
 fn fmt_fstatat(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {}, {}", at_fd(args[0]), path_or_ptr(args[1], path), ptr(args[2]))
+    format!(
+        "{}, {}, {}",
+        at_fd(args[0]),
+        path_or_ptr(args[1], path),
+        ptr(args[2])
+    )
 }
 
 fn fmt_statx(args: &[u64; 6], path: Option<&str>) -> String {
@@ -308,7 +372,12 @@ fn fmt_brk(args: &[u64; 6]) -> String {
 }
 
 fn fmt_socket(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}", socket_domain(args[0]), socket_type(args[1]), args[2])
+    format!(
+        "{}, {}, {}",
+        socket_domain(args[0]),
+        socket_type(args[1]),
+        args[2]
+    )
 }
 
 fn fmt_connect_bind(args: &[u64; 6], sockaddr: &[u8]) -> String {
@@ -343,15 +412,24 @@ fn format_sockaddr(bytes: &[u8], fallback_ptr: u64) -> String {
             });
             let addr = format!(
                 "{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}",
-                groups[0], groups[1], groups[2], groups[3],
-                groups[4], groups[5], groups[6], groups[7],
+                groups[0],
+                groups[1],
+                groups[2],
+                groups[3],
+                groups[4],
+                groups[5],
+                groups[6],
+                groups[7],
             );
             format!("[{addr}]:{port}")
         }
         // AF_UNIX = 1: struct sockaddr_un { u16 family; char path[108]; }
         1 if bytes.len() >= 3 => {
             let path_bytes = &bytes[2..];
-            let end = path_bytes.iter().position(|&b| b == 0).unwrap_or(path_bytes.len());
+            let end = path_bytes
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(path_bytes.len());
             let path = core::str::from_utf8(&path_bytes[..end]).unwrap_or("?");
             format!("\"{}\"", path)
         }
@@ -360,16 +438,41 @@ fn format_sockaddr(bytes: &[u8], fallback_ptr: u64) -> String {
 }
 
 fn fmt_accept(args: &[u64; 6], sockaddr: &[u8]) -> String {
-    format!("{}, {}, {}", fd(args[0]), format_sockaddr(sockaddr, args[1]), ptr(args[2]))
+    format!(
+        "{}, {}, {}",
+        fd(args[0]),
+        format_sockaddr(sockaddr, args[1]),
+        ptr(args[2])
+    )
 }
 
 fn fmt_sendto(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {:#x}, {}, {}", fd(args[0]), ptr(args[1]), args[2], args[3], ptr(args[4]), args[5])
+    format!(
+        "{}, {}, {}, {:#x}, {}, {}",
+        fd(args[0]),
+        ptr(args[1]),
+        args[2],
+        args[3],
+        ptr(args[4]),
+        args[5]
+    )
 }
 
 fn fmt_recvfrom(args: &[u64; 6], ret: i64) -> String {
-    let received = if ret >= 0 { ret.to_string() } else { "err".to_owned() };
-    format!("{}, {}, {} [received {received}], {:#x}, {}, {}", fd(args[0]), ptr(args[1]), args[2], args[3], ptr(args[4]), ptr(args[5]))
+    let received = if ret >= 0 {
+        ret.to_string()
+    } else {
+        "err".to_owned()
+    };
+    format!(
+        "{}, {}, {} [received {received}], {:#x}, {}, {}",
+        fd(args[0]),
+        ptr(args[1]),
+        args[2],
+        args[3],
+        ptr(args[4]),
+        ptr(args[5])
+    )
 }
 
 fn fmt_listen(args: &[u64; 6]) -> String {
@@ -377,28 +480,66 @@ fn fmt_listen(args: &[u64; 6]) -> String {
 }
 
 fn fmt_getname(args: &[u64; 6], sockaddr: &[u8]) -> String {
-    format!("{}, {}, {}", fd(args[0]), format_sockaddr(sockaddr, args[1]), ptr(args[2]))
+    format!(
+        "{}, {}, {}",
+        fd(args[0]),
+        format_sockaddr(sockaddr, args[1]),
+        ptr(args[2])
+    )
 }
 
 fn fmt_sockopt(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {}, {}", fd(args[0]), args[1], args[2], ptr(args[3]), args[4])
+    format!(
+        "{}, {}, {}, {}, {}",
+        fd(args[0]),
+        args[1],
+        args[2],
+        ptr(args[3]),
+        args[4]
+    )
 }
 
 fn fmt_clone(args: &[u64; 6]) -> String {
     let flags = args[0];
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 0x0100 != 0 { parts.push("CLONE_VM"); }
-    if flags & 0x0200 != 0 { parts.push("CLONE_FS"); }
-    if flags & 0x0400 != 0 { parts.push("CLONE_FILES"); }
-    if flags & 0x0800 != 0 { parts.push("CLONE_SIGHAND"); }
-    if flags & 0x4000 != 0 { parts.push("CLONE_PTRACE"); }
-    if flags & 0x8000 != 0 { parts.push("CLONE_VFORK"); }
-    if flags & 0x10000 != 0 { parts.push("CLONE_PARENT"); }
-    if flags & 0x20000 != 0 { parts.push("CLONE_THREAD"); }
-    if flags & 0x80000 != 0 { parts.push("CLONE_NEWNS"); }
-    if flags & 0x200000 != 0 { parts.push("CLONE_NEWPID"); }
-    if flags & 0x400000 != 0 { parts.push("CLONE_NEWNET"); }
-    let flags_str = if parts.is_empty() { format!("{flags:#x}") } else { parts.join("|") };
+    if flags & 0x0100 != 0 {
+        parts.push("CLONE_VM");
+    }
+    if flags & 0x0200 != 0 {
+        parts.push("CLONE_FS");
+    }
+    if flags & 0x0400 != 0 {
+        parts.push("CLONE_FILES");
+    }
+    if flags & 0x0800 != 0 {
+        parts.push("CLONE_SIGHAND");
+    }
+    if flags & 0x4000 != 0 {
+        parts.push("CLONE_PTRACE");
+    }
+    if flags & 0x8000 != 0 {
+        parts.push("CLONE_VFORK");
+    }
+    if flags & 0x10000 != 0 {
+        parts.push("CLONE_PARENT");
+    }
+    if flags & 0x20000 != 0 {
+        parts.push("CLONE_THREAD");
+    }
+    if flags & 0x80000 != 0 {
+        parts.push("CLONE_NEWNS");
+    }
+    if flags & 0x200000 != 0 {
+        parts.push("CLONE_NEWPID");
+    }
+    if flags & 0x400000 != 0 {
+        parts.push("CLONE_NEWNET");
+    }
+    let flags_str = if parts.is_empty() {
+        format!("{flags:#x}")
+    } else {
+        parts.join("|")
+    };
     format!("{flags_str}, {}, {}", ptr(args[1]), ptr(args[2]))
 }
 
@@ -407,7 +548,12 @@ fn fmt_clone3(args: &[u64; 6]) -> String {
 }
 
 fn fmt_execve(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {}, {}", path_or_ptr(args[0], path), ptr(args[1]), ptr(args[2]))
+    format!(
+        "{}, {}, {}",
+        path_or_ptr(args[0], path),
+        ptr(args[1]),
+        ptr(args[2])
+    )
 }
 
 fn fmt_execveat(args: &[u64; 6], path: Option<&str>) -> String {
@@ -506,15 +652,29 @@ fn fmt_ioctl(args: &[u64; 6]) -> String {
 }
 
 fn fmt_fallocate(args: &[u64; 6]) -> String {
-    format!("{}, {:#x}, {}, {}", fd(args[0]), args[1], args[2] as i64, args[3])
+    format!(
+        "{}, {:#x}, {}, {}",
+        fd(args[0]),
+        args[1],
+        args[2] as i64,
+        args[3]
+    )
 }
 
 fn fmt_getrandom(args: &[u64; 6]) -> String {
     let flags = args[2];
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 1 != 0 { parts.push("GRND_NONBLOCK"); }
-    if flags & 2 != 0 { parts.push("GRND_RANDOM"); }
-    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    if flags & 1 != 0 {
+        parts.push("GRND_NONBLOCK");
+    }
+    if flags & 2 != 0 {
+        parts.push("GRND_RANDOM");
+    }
+    let flags_str = if parts.is_empty() {
+        "0".to_owned()
+    } else {
+        parts.join("|")
+    };
     format!("{}, {}, {flags_str}", ptr(args[0]), args[1])
 }
 
@@ -548,7 +708,13 @@ fn fmt_epoll_ctl(args: &[u64; 6]) -> String {
 }
 
 fn fmt_epoll_wait(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {}", fd(args[0]), ptr(args[1]), args[2], args[3] as i32)
+    format!(
+        "{}, {}, {}, {}",
+        fd(args[0]),
+        ptr(args[1]),
+        args[2],
+        args[3] as i32
+    )
 }
 
 fn fmt_sendmsg(args: &[u64; 6]) -> String {
@@ -562,7 +728,13 @@ fn fmt_recvmsg(args: &[u64; 6]) -> String {
 }
 
 fn fmt_socketpair(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {}", socket_domain(args[0]), socket_type(args[1]), args[2], ptr(args[3]))
+    format!(
+        "{}, {}, {}, {}",
+        socket_domain(args[0]),
+        socket_type(args[1]),
+        args[2],
+        ptr(args[3])
+    )
 }
 
 fn fmt_ftruncate(args: &[u64; 6]) -> String {
@@ -575,13 +747,13 @@ fn fmt_truncate(args: &[u64; 6], path: Option<&str>) -> String {
 
 fn fmt_madvise(args: &[u64; 6]) -> String {
     let advice = match args[2] {
-        0  => "MADV_NORMAL",
-        1  => "MADV_RANDOM",
-        2  => "MADV_SEQUENTIAL",
-        3  => "MADV_WILLNEED",
-        4  => "MADV_DONTNEED",
-        8  => "MADV_FREE",
-        9  => "MADV_REMOVE",
+        0 => "MADV_NORMAL",
+        1 => "MADV_RANDOM",
+        2 => "MADV_SEQUENTIAL",
+        3 => "MADV_WILLNEED",
+        4 => "MADV_DONTNEED",
+        8 => "MADV_FREE",
+        9 => "MADV_REMOVE",
         10 => "MADV_DONTFORK",
         11 => "MADV_DOFORK",
         12 => "MADV_MERGEABLE",
@@ -590,35 +762,63 @@ fn fmt_madvise(args: &[u64; 6]) -> String {
         15 => "MADV_NOHUGEPAGE",
         16 => "MADV_DONTDUMP",
         17 => "MADV_DODUMP",
-        _  => "MADV_?",
+        _ => "MADV_?",
     };
     format!("{}, {}, {advice}", ptr(args[0]), args[1])
 }
 
 fn fmt_sendfile(args: &[u64; 6]) -> String {
-    format!("{}, {}, {}, {}", fd(args[0]), fd(args[1]), ptr(args[2]), args[3])
+    format!(
+        "{}, {}, {}, {}",
+        fd(args[0]),
+        fd(args[1]),
+        ptr(args[2]),
+        args[3]
+    )
 }
 
 fn fmt_splice(args: &[u64; 6]) -> String {
     // splice(fd_in, off_in, fd_out, off_out, len, flags)
     let flags = args[5];
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 1 != 0 { parts.push("SPLICE_F_MOVE"); }
-    if flags & 2 != 0 { parts.push("SPLICE_F_NONBLOCK"); }
-    if flags & 4 != 0 { parts.push("SPLICE_F_MORE"); }
-    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    if flags & 1 != 0 {
+        parts.push("SPLICE_F_MOVE");
+    }
+    if flags & 2 != 0 {
+        parts.push("SPLICE_F_NONBLOCK");
+    }
+    if flags & 4 != 0 {
+        parts.push("SPLICE_F_MORE");
+    }
+    let flags_str = if parts.is_empty() {
+        "0".to_owned()
+    } else {
+        parts.join("|")
+    };
     format!(
         "{}, {}, {}, {}, {}, {flags_str}",
-        fd(args[0]), ptr(args[1]), fd(args[2]), ptr(args[3]), args[4]
+        fd(args[0]),
+        ptr(args[1]),
+        fd(args[2]),
+        ptr(args[3]),
+        args[4]
     )
 }
 
 fn fmt_memfd_create(args: &[u64; 6]) -> String {
     let flags = args[1];
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 1 != 0 { parts.push("MFD_CLOEXEC"); }
-    if flags & 2 != 0 { parts.push("MFD_ALLOW_SEALING"); }
-    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    if flags & 1 != 0 {
+        parts.push("MFD_CLOEXEC");
+    }
+    if flags & 2 != 0 {
+        parts.push("MFD_ALLOW_SEALING");
+    }
+    let flags_str = if parts.is_empty() {
+        "0".to_owned()
+    } else {
+        parts.join("|")
+    };
     format!("{}, {flags_str}", ptr(args[0]))
 }
 
@@ -637,44 +837,66 @@ fn fmt_readv(args: &[u64; 6]) -> String {
 fn fmt_mremap(args: &[u64; 6]) -> String {
     let flags = args[3];
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 1 != 0 { parts.push("MREMAP_MAYMOVE"); }
-    if flags & 2 != 0 { parts.push("MREMAP_FIXED"); }
-    let flags_str = if parts.is_empty() { format!("{flags:#x}") } else { parts.join("|") };
+    if flags & 1 != 0 {
+        parts.push("MREMAP_MAYMOVE");
+    }
+    if flags & 2 != 0 {
+        parts.push("MREMAP_FIXED");
+    }
+    let flags_str = if parts.is_empty() {
+        format!("{flags:#x}")
+    } else {
+        parts.join("|")
+    };
     format!("{}, {}, {}, {flags_str}", ptr(args[0]), args[1], args[2])
 }
 
 fn fmt_msync(args: &[u64; 6]) -> String {
     let flags = args[2];
     let mut parts: Vec<&str> = Vec::new();
-    if flags & 1 != 0 { parts.push("MS_ASYNC"); }
-    if flags & 2 != 0 { parts.push("MS_INVALIDATE"); }
-    if flags & 4 != 0 { parts.push("MS_SYNC"); }
-    let flags_str = if parts.is_empty() { "0".to_owned() } else { parts.join("|") };
+    if flags & 1 != 0 {
+        parts.push("MS_ASYNC");
+    }
+    if flags & 2 != 0 {
+        parts.push("MS_INVALIDATE");
+    }
+    if flags & 4 != 0 {
+        parts.push("MS_SYNC");
+    }
+    let flags_str = if parts.is_empty() {
+        "0".to_owned()
+    } else {
+        parts.join("|")
+    };
     format!("{}, {}, {flags_str}", ptr(args[0]), args[1])
 }
 
 fn fmt_prlimit(args: &[u64; 6]) -> String {
     let resource = match args[1] {
-        0  => "RLIMIT_CPU",
-        1  => "RLIMIT_FSIZE",
-        2  => "RLIMIT_DATA",
-        3  => "RLIMIT_STACK",
-        4  => "RLIMIT_CORE",
-        5  => "RLIMIT_RSS",
-        6  => "RLIMIT_NPROC",
-        7  => "RLIMIT_NOFILE",
-        8  => "RLIMIT_MEMLOCK",
-        9  => "RLIMIT_AS",
+        0 => "RLIMIT_CPU",
+        1 => "RLIMIT_FSIZE",
+        2 => "RLIMIT_DATA",
+        3 => "RLIMIT_STACK",
+        4 => "RLIMIT_CORE",
+        5 => "RLIMIT_RSS",
+        6 => "RLIMIT_NPROC",
+        7 => "RLIMIT_NOFILE",
+        8 => "RLIMIT_MEMLOCK",
+        9 => "RLIMIT_AS",
         10 => "RLIMIT_LOCKS",
         11 => "RLIMIT_SIGPENDING",
         12 => "RLIMIT_MSGQUEUE",
         13 => "RLIMIT_NICE",
         14 => "RLIMIT_RTPRIO",
-        _  => "RLIMIT_?",
+        _ => "RLIMIT_?",
     };
-    format!("{}, {resource}, {}, {}", args[0] as i32, ptr(args[2]), ptr(args[3]))
+    format!(
+        "{}, {resource}, {}, {}",
+        args[0] as i32,
+        ptr(args[2]),
+        ptr(args[3])
+    )
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -694,8 +916,7 @@ mod tests {
     #[test]
     fn sockaddr_ipv4_any_443() {
         let bytes: [u8; 8] = [
-            0x02, 0x00,
-            0x01, 0xBB, // port 443
+            0x02, 0x00, 0x01, 0xBB, // port 443
             0, 0, 0, 0, // 0.0.0.0
         ];
         assert_eq!(format_sockaddr(&bytes, 0), "0.0.0.0:443");

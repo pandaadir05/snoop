@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use anyhow::{bail, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
-use crate::{filter::Filter, output::OutputMode};
 #[cfg(target_os = "linux")]
 use crate::uprobe::UprobeConfig;
+use crate::{filter::Filter, output::OutputMode};
 
 /// A modern syscall tracer for Linux, built on eBPF.
 #[derive(Debug, Parser)]
@@ -28,7 +28,6 @@ pub struct Cli {
     pub command: Option<Command>,
 
     // ── trace mode (default when no subcommand given) ──────────────────────
-
     /// Attach to an existing process by PID.
     #[arg(short = 'p', long, value_name = "PID", global = false,
           conflicts_with_all = ["docker", "pod"])]
@@ -62,8 +61,13 @@ pub struct Cli {
     pub pod: Option<String>,
 
     /// Kubernetes namespace for `--pod` (default: `"default"`).
-    #[arg(long, short = 'n', value_name = "NS", default_value = "default",
-          requires = "pod")]
+    #[arg(
+        long,
+        short = 'n',
+        value_name = "NS",
+        default_value = "default",
+        requires = "pod"
+    )]
     pub namespace: String,
 
     /// Command to spawn and trace (everything after `--` or the first
@@ -72,12 +76,11 @@ pub struct Cli {
         value_name = "CMD",
         last = false,
         allow_hyphen_values = true,
-        trailing_var_arg = true,
+        trailing_var_arg = true
     )]
     pub cmd: Vec<String>,
 
     // ── output mode ────────────────────────────────────────────────────────
-
     /// Print strace-compatible one-line output instead of the TUI.
     ///
     /// Automatically selected when stdout is not a TTY.
@@ -103,7 +106,6 @@ pub struct Cli {
     pub explain: bool,
 
     // ── filtering ──────────────────────────────────────────────────────────
-
     /// Restrict output to file-system syscalls.
     #[arg(long, conflicts_with_all = ["net"])]
     pub files: bool,
@@ -127,7 +129,6 @@ pub struct Cli {
     pub no_decode: bool,
 
     // ── advanced ───────────────────────────────────────────────────────────
-
     /// Capture TLS plaintext via uprobes on `SSL_write` / `SSL_read`.
     ///
     /// Requires OpenSSL in the target process.  Shows decrypted payloads
@@ -189,8 +190,13 @@ pub enum Command {
         pod: Option<String>,
 
         /// Kubernetes namespace for `--pod` (default: `"default"`).
-        #[arg(long, short = 'n', value_name = "NS", default_value = "default",
-              requires = "pod")]
+        #[arg(
+            long,
+            short = 'n',
+            value_name = "NS",
+            default_value = "default",
+            requires = "pod"
+        )]
         namespace: String,
 
         /// Command to spawn and trace.
@@ -198,7 +204,7 @@ pub enum Command {
             value_name = "CMD",
             last = false,
             allow_hyphen_values = true,
-            trailing_var_arg = true,
+            trailing_var_arg = true
         )]
         command: Vec<String>,
 
@@ -279,9 +285,7 @@ impl Cli {
     /// Validate the parsed arguments and dispatch to the tracer or viewer.
     pub async fn run(self) -> Result<()> {
         match self.command {
-            Some(Command::Diff { a, b }) => {
-                return crate::diff::run(&a, &b).map_err(Into::into);
-            }
+            Some(Command::Diff { a, b }) => crate::diff::run(&a, &b),
 
             Some(Command::View {
                 file,
@@ -298,7 +302,11 @@ impl Cli {
                     category_files: files,
                     category_net: net,
                     slow_threshold_ns: slow.map(|ms| (ms * 1_000_000.0) as u64),
-                    syscall_allowlist: if syscalls.is_empty() { None } else { Some(syscalls) },
+                    syscall_allowlist: if syscalls.is_empty() {
+                        None
+                    } else {
+                        Some(syscalls)
+                    },
                     no_decode,
                 };
                 let mode = if json {
@@ -332,21 +340,14 @@ impl Cli {
                     check_privileges()?;
                     if let Some(name) = docker {
                         let resolved = crate::container::resolve_docker(&name)?;
-                        return crate::tracer::record_attach(
-                            resolved, true, output, ebpf_obj,
-                        )
-                        .await;
+                        return crate::tracer::record_attach(resolved, true, output, ebpf_obj)
+                            .await;
                     } else if let Some(pod_name) = pod {
                         let resolved = crate::container::resolve_pod(&pod_name, &namespace)?;
-                        return crate::tracer::record_attach(
-                            resolved, true, output, ebpf_obj,
-                        )
-                        .await;
+                        return crate::tracer::record_attach(resolved, true, output, ebpf_obj)
+                            .await;
                     } else if let Some(pid) = pid {
-                        return crate::tracer::record_attach(
-                            pid, follow, output, ebpf_obj,
-                        )
-                        .await;
+                        return crate::tracer::record_attach(pid, follow, output, ebpf_obj).await;
                     } else {
                         return crate::tracer::record_spawn(&command, output, ebpf_obj).await;
                     }
@@ -356,7 +357,9 @@ impl Cli {
             None => {
                 // Default trace mode — require one of: --pid, --docker, --pod, or CMD.
                 #[cfg(not(target_os = "linux"))]
-                bail!("snoop requires a Linux kernel (eBPF tracepoints are not available on this OS)");
+                bail!(
+                    "snoop requires a Linux kernel (eBPF tracepoints are not available on this OS)"
+                );
 
                 #[cfg(target_os = "linux")]
                 {
@@ -376,29 +379,54 @@ impl Cli {
                     let filter = self.build_filter();
                     let mode = self.output_mode();
                     let flamegraph = self.flamegraph;
-                    let uprobes = UprobeConfig { tls: self.tls, ltrace: self.ltrace };
+                    let uprobes = UprobeConfig {
+                        tls: self.tls,
+                        ltrace: self.ltrace,
+                    };
 
                     if let Some(name) = self.docker {
                         let pid = crate::container::resolve_docker(&name)?;
                         crate::tracer::attach(
-                            pid, true, filter, mode, flamegraph, self.ebpf_obj, uprobes,
+                            pid,
+                            true,
+                            filter,
+                            mode,
+                            flamegraph,
+                            self.ebpf_obj,
+                            uprobes,
                         )
                         .await
                     } else if let Some(pod_name) = self.pod {
-                        let pid =
-                            crate::container::resolve_pod(&pod_name, &self.namespace)?;
+                        let pid = crate::container::resolve_pod(&pod_name, &self.namespace)?;
                         crate::tracer::attach(
-                            pid, true, filter, mode, flamegraph, self.ebpf_obj, uprobes,
+                            pid,
+                            true,
+                            filter,
+                            mode,
+                            flamegraph,
+                            self.ebpf_obj,
+                            uprobes,
                         )
                         .await
                     } else if let Some(pid) = self.pid {
                         crate::tracer::attach(
-                            pid, self.follow, filter, mode, flamegraph, self.ebpf_obj, uprobes,
+                            pid,
+                            self.follow,
+                            filter,
+                            mode,
+                            flamegraph,
+                            self.ebpf_obj,
+                            uprobes,
                         )
                         .await
                     } else {
                         crate::tracer::spawn(
-                            &self.cmd, filter, mode, flamegraph, self.ebpf_obj, uprobes,
+                            &self.cmd,
+                            filter,
+                            mode,
+                            flamegraph,
+                            self.ebpf_obj,
+                            uprobes,
                         )
                         .await
                     }

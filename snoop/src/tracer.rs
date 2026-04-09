@@ -16,8 +16,7 @@ use crate::{
     flamegraph::FlamegraphCollector,
     loader,
     output::{
-        explain::ExplainOutput, json::JsonOutput, lib_call, raw::RawOutput, tui::TuiApp,
-        OutputMode,
+        explain::ExplainOutput, json::JsonOutput, lib_call, raw::RawOutput, tui::TuiApp, OutputMode,
     },
     record::TraceWriter,
     uprobe::UprobeConfig,
@@ -159,9 +158,7 @@ async fn consume_lib_ring_buf(
                 log::warn!("short LIB_EVENTS item ({} bytes), skipping", item.len());
                 continue;
             }
-            let event = unsafe {
-                std::ptr::read_unaligned(item.as_ptr() as *const LibCallEvent)
-            };
+            let event = unsafe { std::ptr::read_unaligned(item.as_ptr() as *const LibCallEvent) };
             // When the receiver is gone the output layer has exited — stop.
             if tx.send(event).await.is_err() {
                 return Ok(());
@@ -229,10 +226,10 @@ async fn run_output(
     target_pid: Option<u32>,
 ) -> Result<()> {
     match mode {
-        OutputMode::Raw     => run_raw(rx, lib_rx, done, filter, flamegraph).await,
-        OutputMode::Json    => run_json(rx, lib_rx, done, filter, flamegraph).await,
+        OutputMode::Raw => run_raw(rx, lib_rx, done, filter, flamegraph).await,
+        OutputMode::Json => run_json(rx, lib_rx, done, filter, flamegraph).await,
         OutputMode::Explain => run_explain(rx, lib_rx, done, filter, flamegraph).await,
-        OutputMode::Tui     => run_tui(rx, lib_rx, done, filter, flamegraph, target_pid).await,
+        OutputMode::Tui => run_tui(rx, lib_rx, done, filter, flamegraph, target_pid).await,
     }
 }
 
@@ -246,7 +243,7 @@ async fn run_output(
 async fn opt_recv(rx: &mut Option<mpsc::Receiver<LibCallEvent>>) -> Option<LibCallEvent> {
     match rx {
         Some(r) => r.recv().await,
-        None    => std::future::pending().await,
+        None => std::future::pending().await,
     }
 }
 

@@ -143,14 +143,10 @@ fn capture_path_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
     let path_ptr: *const u8 = match enter.syscall_nr {
         // open, creat, execve, stat, lstat, symlink, readlink, access,
         // truncate, mkdir, rmdir, unlink, rename (old path)
-        2 | 59 | 85 | 4 | 6 | 88 | 89 | 21 | 76 | 83 | 84 | 87 | 82 => {
-            enter.args[0] as *const u8
-        }
+        2 | 59 | 85 | 4 | 6 | 88 | 89 | 21 | 76 | 83 | 84 | 87 | 82 => enter.args[0] as *const u8,
         // openat, mkdirat, unlinkat, renameat, execveat, fstatat, readlinkat,
         // faccessat, utimensat (path in args[1])
-        257 | 258 | 263 | 264 | 322 | 262 | 267 | 269 | 280 => {
-            enter.args[1] as *const u8
-        }
+        257 | 258 | 263 | 264 | 322 | 262 | 267 | 269 | 280 => enter.args[1] as *const u8,
         _ => return 0,
     };
 
@@ -210,9 +206,7 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u8 {
     let read_len: usize = match enter.syscall_nr {
         // connect(fd, sa*, addrlen) / bind(fd, sa*, addrlen)
         // args[2] is the length directly.
-        42 | 49 => {
-            (enter.args[2] as usize).min(SOCKADDR_MAX_LEN)
-        }
+        42 | 49 => (enter.args[2] as usize).min(SOCKADDR_MAX_LEN),
         // accept(fd, sa*, len*) / accept4(fd, sa*, len*, flags)
         // getpeername(fd, sa*, len*) / getsockname(fd, sa*, len*)
         // args[2] is a pointer to the length; read it from user memory.
@@ -251,8 +245,7 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u8 {
         None => return 0,
     };
 
-    let dest: &mut [u8] =
-        unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, read_len) };
+    let dest: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, read_len) };
 
     if unsafe { bpf_probe_read_user_bytes(sa_ptr, dest) }.is_err() {
         return 0;

@@ -23,8 +23,7 @@ use std::{
 
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent,
-        KeyModifiers,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -34,7 +33,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState},
+    widgets::{
+        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    },
     Frame, Terminal,
 };
 use snoop_common::{LibCallEvent, SyscallEvent, SyscallNr};
@@ -113,7 +114,11 @@ impl TuiApp {
     }
 
     /// Create a TUI application, optionally enabling flamegraph collection.
-    pub fn with_flamegraph(filter: Filter, target_pid: Option<u32>, collect_flamegraph: bool) -> Self {
+    pub fn with_flamegraph(
+        filter: Filter,
+        target_pid: Option<u32>,
+        collect_flamegraph: bool,
+    ) -> Self {
         Self {
             filter,
             events: Vec::with_capacity(1024),
@@ -128,7 +133,11 @@ impl TuiApp {
             target_pid,
             target_comm: String::new(),
             target_exited: false,
-            fg_collector: if collect_flamegraph { Some(FlamegraphCollector::new()) } else { None },
+            fg_collector: if collect_flamegraph {
+                Some(FlamegraphCollector::new())
+            } else {
+                None
+            },
             detail_idx: None,
         }
     }
@@ -230,7 +239,9 @@ impl TuiApp {
         let backend = CrosstermBackend::new(io::stderr());
         let mut terminal = Terminal::new(backend)?;
 
-        let result = self.event_loop(&mut terminal, &mut rx, &mut lib_rx, &mut done).await;
+        let result = self
+            .event_loop(&mut terminal, &mut rx, &mut lib_rx, &mut done)
+            .await;
 
         // Always restore the terminal, even on error.
         disable_raw_mode()?;
@@ -423,7 +434,10 @@ impl TuiApp {
         if len == 0 {
             return;
         }
-        let current = self.stream_state.selected().unwrap_or(len.saturating_sub(1)) as i64;
+        let current = self
+            .stream_state
+            .selected()
+            .unwrap_or(len.saturating_sub(1)) as i64;
         let next = (current + delta).clamp(0, len as i64 - 1) as usize;
         self.stream_state.select(Some(next));
         // If user scrolled up, pause auto-scroll.
@@ -492,10 +506,18 @@ impl TuiApp {
 
     fn active_filter_label(&self) -> String {
         let mut parts: Vec<&str> = Vec::new();
-        if self.filter.category_files { parts.push("files"); }
-        if self.filter.category_net { parts.push("net"); }
-        if self.filter.slow_threshold_ns.is_some() { parts.push("slow"); }
-        if self.filter.syscall_allowlist.is_some() { parts.push("search"); }
+        if self.filter.category_files {
+            parts.push("files");
+        }
+        if self.filter.category_net {
+            parts.push("net");
+        }
+        if self.filter.slow_threshold_ns.is_some() {
+            parts.push("slow");
+        }
+        if self.filter.syscall_allowlist.is_some() {
+            parts.push("search");
+        }
         if parts.is_empty() {
             String::new()
         } else {
@@ -506,10 +528,7 @@ impl TuiApp {
     fn render_main(&mut self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(65),
-                Constraint::Percentage(35),
-            ])
+            .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
             .split(area);
 
         self.render_stream(f, chunks[0]);
@@ -547,7 +566,15 @@ impl TuiApp {
                     ]);
                     ListItem::new(line)
                 }
-                TuiEvent::LibCall { timestamp_ns, duration_ns, comm, name, args_str, ret_str, .. } => {
+                TuiEvent::LibCall {
+                    timestamp_ns,
+                    duration_ns,
+                    comm,
+                    name,
+                    args_str,
+                    ret_str,
+                    ..
+                } => {
                     let duration_ms = *duration_ns as f64 / 1_000_000.0;
                     let elapsed_s = *timestamp_ns as f64 / 1_000_000_000.0;
                     let line = Line::from(vec![
@@ -555,10 +582,7 @@ impl TuiApp {
                             format!("[{elapsed_s:>8.3}] "),
                             Style::default().fg(Color::DarkGray),
                         ),
-                        Span::styled(
-                            format!("{:<12} ", comm),
-                            Style::default().fg(Color::Yellow),
-                        ),
+                        Span::styled(format!("{:<12} ", comm), Style::default().fg(Color::Yellow)),
                         Span::styled(*name, Style::default().fg(Color::Cyan)),
                         Span::raw(format!("({args_str}) = {ret_str} ")),
                         Span::styled(
@@ -626,7 +650,11 @@ impl TuiApp {
                 Row::new(vec!["syscall", "   count", "   pct"])
                     .style(Style::default().add_modifier(Modifier::BOLD)),
             )
-            .block(Block::default().borders(Borders::ALL).title(" top syscalls "));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" top syscalls "),
+            );
 
         f.render_stateful_widget(table, area, &mut self.table_state);
     }
@@ -655,14 +683,16 @@ impl TuiApp {
 /// Render a detail popup over the full terminal area for the given event.
 fn render_detail_popup(f: &mut Frame, area: Rect, ev: &DecodedEvent) {
     // Centre a box that is 70% wide and 12 rows tall.
-    let popup_w = (area.width * 70 / 100).max(50).min(area.width.saturating_sub(4));
+    let popup_w = (area.width * 70 / 100)
+        .max(50)
+        .min(area.width.saturating_sub(4));
     let popup_h = 14u16.min(area.height.saturating_sub(4));
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
     let popup_area = Rect::new(x, y, popup_w, popup_h);
 
-    let elapsed_s  = ev.timestamp_ns as f64 / 1_000_000_000.0;
-    let dur_ms     = ev.duration_ns as f64 / 1_000_000.0;
+    let elapsed_s = ev.timestamp_ns as f64 / 1_000_000_000.0;
+    let dur_ms = ev.duration_ns as f64 / 1_000_000.0;
 
     let lines: Vec<Line> = vec![
         Line::from(vec![
@@ -681,8 +711,11 @@ fn render_detail_popup(f: &mut Frame, area: Rect, ev: &DecodedEvent) {
             Span::styled("duration:  ", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(
                 format!("{:.3}ms", dur_ms),
-                if dur_ms > 10.0 { Style::default().fg(Color::Red) }
-                else { Style::default().fg(Color::White) },
+                if dur_ms > 10.0 {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default().fg(Color::White)
+                },
             ),
         ]),
         Line::from(vec![
@@ -714,31 +747,68 @@ fn render_detail_popup(f: &mut Frame, area: Rect, ev: &DecodedEvent) {
 fn syscall_color(nr: SyscallNr) -> Color {
     // File-system operations.
     const FS: &[SyscallNr] = &[
-        SyscallNr::OPEN, SyscallNr::OPENAT, SyscallNr::READ, SyscallNr::WRITE,
-        SyscallNr::CLOSE, SyscallNr::STAT, SyscallNr::FSTAT, SyscallNr::LSTAT,
-        SyscallNr::PREAD64, SyscallNr::PWRITE64, SyscallNr::LSEEK,
-        SyscallNr::FSTATAT, SyscallNr::STATX, SyscallNr::GETDENTS64,
-        SyscallNr::TRUNCATE, SyscallNr::FTRUNCATE, SyscallNr::FALLOCATE,
-        SyscallNr::RENAME, SyscallNr::RENAMEAT, SyscallNr::MKDIR,
-        SyscallNr::MKDIRAT, SyscallNr::RMDIR, SyscallNr::UNLINK,
-        SyscallNr::UNLINKAT, SyscallNr::FSYNC, SyscallNr::FDATASYNC,
+        SyscallNr::OPEN,
+        SyscallNr::OPENAT,
+        SyscallNr::READ,
+        SyscallNr::WRITE,
+        SyscallNr::CLOSE,
+        SyscallNr::STAT,
+        SyscallNr::FSTAT,
+        SyscallNr::LSTAT,
+        SyscallNr::PREAD64,
+        SyscallNr::PWRITE64,
+        SyscallNr::LSEEK,
+        SyscallNr::FSTATAT,
+        SyscallNr::STATX,
+        SyscallNr::GETDENTS64,
+        SyscallNr::TRUNCATE,
+        SyscallNr::FTRUNCATE,
+        SyscallNr::FALLOCATE,
+        SyscallNr::RENAME,
+        SyscallNr::RENAMEAT,
+        SyscallNr::MKDIR,
+        SyscallNr::MKDIRAT,
+        SyscallNr::RMDIR,
+        SyscallNr::UNLINK,
+        SyscallNr::UNLINKAT,
+        SyscallNr::FSYNC,
+        SyscallNr::FDATASYNC,
     ];
     // Network operations.
     const NET: &[SyscallNr] = &[
-        SyscallNr::SOCKET, SyscallNr::CONNECT, SyscallNr::BIND,
-        SyscallNr::LISTEN, SyscallNr::ACCEPT, SyscallNr::ACCEPT4,
-        SyscallNr::SENDTO, SyscallNr::RECVFROM, SyscallNr::SENDMSG,
-        SyscallNr::RECVMSG, SyscallNr::GETSOCKNAME, SyscallNr::GETPEERNAME,
+        SyscallNr::SOCKET,
+        SyscallNr::CONNECT,
+        SyscallNr::BIND,
+        SyscallNr::LISTEN,
+        SyscallNr::ACCEPT,
+        SyscallNr::ACCEPT4,
+        SyscallNr::SENDTO,
+        SyscallNr::RECVFROM,
+        SyscallNr::SENDMSG,
+        SyscallNr::RECVMSG,
+        SyscallNr::GETSOCKNAME,
+        SyscallNr::GETPEERNAME,
     ];
     // Process lifecycle.
     const PROC: &[SyscallNr] = &[
-        SyscallNr::CLONE, SyscallNr::CLONE3, SyscallNr::FORK, SyscallNr::VFORK,
-        SyscallNr::EXECVE, SyscallNr::EXECVEAT, SyscallNr::EXIT,
-        SyscallNr::EXIT_GROUP, SyscallNr::WAIT4, SyscallNr::WAITID, SyscallNr::KILL,
+        SyscallNr::CLONE,
+        SyscallNr::CLONE3,
+        SyscallNr::FORK,
+        SyscallNr::VFORK,
+        SyscallNr::EXECVE,
+        SyscallNr::EXECVEAT,
+        SyscallNr::EXIT,
+        SyscallNr::EXIT_GROUP,
+        SyscallNr::WAIT4,
+        SyscallNr::WAITID,
+        SyscallNr::KILL,
     ];
     // Memory management.
     const MEM: &[SyscallNr] = &[
-        SyscallNr::MMAP, SyscallNr::MPROTECT, SyscallNr::MUNMAP, SyscallNr::BRK,
+        SyscallNr::MMAP,
+        SyscallNr::MPROTECT,
+        SyscallNr::MUNMAP,
+        SyscallNr::BRK,
         SyscallNr::MADVISE,
     ];
 
@@ -762,31 +832,78 @@ fn name_to_nr(name: &str) -> i64 {
     // area, so performance is not a concern.
     use snoop_common::SyscallNr as N;
     const TABLE: &[(&str, SyscallNr)] = &[
-        ("read", N::READ), ("write", N::WRITE), ("open", N::OPEN),
-        ("close", N::CLOSE), ("stat", N::STAT), ("fstat", N::FSTAT),
-        ("lstat", N::LSTAT), ("lseek", N::LSEEK), ("mmap", N::MMAP),
-        ("mprotect", N::MPROTECT), ("munmap", N::MUNMAP), ("brk", N::BRK),
-        ("ioctl", N::IOCTL), ("pread64", N::PREAD64), ("pwrite64", N::PWRITE64),
-        ("pipe", N::PIPE), ("dup", N::DUP), ("dup2", N::DUP2),
-        ("socket", N::SOCKET), ("connect", N::CONNECT), ("accept", N::ACCEPT),
-        ("sendto", N::SENDTO), ("recvfrom", N::RECVFROM), ("sendmsg", N::SENDMSG),
-        ("recvmsg", N::RECVMSG), ("bind", N::BIND), ("listen", N::LISTEN),
-        ("clone", N::CLONE), ("fork", N::FORK), ("vfork", N::VFORK),
-        ("execve", N::EXECVE), ("exit", N::EXIT), ("wait4", N::WAIT4),
-        ("kill", N::KILL), ("fcntl", N::FCNTL), ("getcwd", N::GETCWD),
-        ("chdir", N::CHDIR), ("fchdir", N::FCHDIR), ("rename", N::RENAME),
-        ("mkdir", N::MKDIR), ("rmdir", N::RMDIR), ("unlink", N::UNLINK),
-        ("futex", N::FUTEX), ("accept4", N::ACCEPT4), ("dup3", N::DUP3),
-        ("pipe2", N::PIPE2), ("openat", N::OPENAT), ("mkdirat", N::MKDIRAT),
-        ("unlinkat", N::UNLINKAT), ("renameat", N::RENAMEAT), ("fstatat", N::FSTATAT),
-        ("execveat", N::EXECVEAT), ("clone3", N::CLONE3), ("exit_group", N::EXIT_GROUP),
-        ("statx", N::STATX), ("getdents64", N::GETDENTS64), ("getrandom", N::GETRANDOM),
-        ("memfd_create", N::MEMFD_CREATE), ("ftruncate", N::FTRUNCATE),
-        ("truncate", N::TRUNCATE), ("fallocate", N::FALLOCATE), ("fsync", N::FSYNC),
-        ("fdatasync", N::FDATASYNC), ("madvise", N::MADVISE), ("sendfile", N::SENDFILE),
-        ("splice", N::SPLICE), ("getsockname", N::GETSOCKNAME),
-        ("getpeername", N::GETPEERNAME), ("setsockopt", N::SETSOCKOPT),
-        ("getsockopt", N::GETSOCKOPT), ("prctl", N::PRCTL), ("waitid", N::WAITID),
+        ("read", N::READ),
+        ("write", N::WRITE),
+        ("open", N::OPEN),
+        ("close", N::CLOSE),
+        ("stat", N::STAT),
+        ("fstat", N::FSTAT),
+        ("lstat", N::LSTAT),
+        ("lseek", N::LSEEK),
+        ("mmap", N::MMAP),
+        ("mprotect", N::MPROTECT),
+        ("munmap", N::MUNMAP),
+        ("brk", N::BRK),
+        ("ioctl", N::IOCTL),
+        ("pread64", N::PREAD64),
+        ("pwrite64", N::PWRITE64),
+        ("pipe", N::PIPE),
+        ("dup", N::DUP),
+        ("dup2", N::DUP2),
+        ("socket", N::SOCKET),
+        ("connect", N::CONNECT),
+        ("accept", N::ACCEPT),
+        ("sendto", N::SENDTO),
+        ("recvfrom", N::RECVFROM),
+        ("sendmsg", N::SENDMSG),
+        ("recvmsg", N::RECVMSG),
+        ("bind", N::BIND),
+        ("listen", N::LISTEN),
+        ("clone", N::CLONE),
+        ("fork", N::FORK),
+        ("vfork", N::VFORK),
+        ("execve", N::EXECVE),
+        ("exit", N::EXIT),
+        ("wait4", N::WAIT4),
+        ("kill", N::KILL),
+        ("fcntl", N::FCNTL),
+        ("getcwd", N::GETCWD),
+        ("chdir", N::CHDIR),
+        ("fchdir", N::FCHDIR),
+        ("rename", N::RENAME),
+        ("mkdir", N::MKDIR),
+        ("rmdir", N::RMDIR),
+        ("unlink", N::UNLINK),
+        ("futex", N::FUTEX),
+        ("accept4", N::ACCEPT4),
+        ("dup3", N::DUP3),
+        ("pipe2", N::PIPE2),
+        ("openat", N::OPENAT),
+        ("mkdirat", N::MKDIRAT),
+        ("unlinkat", N::UNLINKAT),
+        ("renameat", N::RENAMEAT),
+        ("fstatat", N::FSTATAT),
+        ("execveat", N::EXECVEAT),
+        ("clone3", N::CLONE3),
+        ("exit_group", N::EXIT_GROUP),
+        ("statx", N::STATX),
+        ("getdents64", N::GETDENTS64),
+        ("getrandom", N::GETRANDOM),
+        ("memfd_create", N::MEMFD_CREATE),
+        ("ftruncate", N::FTRUNCATE),
+        ("truncate", N::TRUNCATE),
+        ("fallocate", N::FALLOCATE),
+        ("fsync", N::FSYNC),
+        ("fdatasync", N::FDATASYNC),
+        ("madvise", N::MADVISE),
+        ("sendfile", N::SENDFILE),
+        ("splice", N::SPLICE),
+        ("getsockname", N::GETSOCKNAME),
+        ("getpeername", N::GETPEERNAME),
+        ("setsockopt", N::SETSOCKOPT),
+        ("getsockopt", N::GETSOCKOPT),
+        ("prctl", N::PRCTL),
+        ("waitid", N::WAITID),
     ];
 
     TABLE

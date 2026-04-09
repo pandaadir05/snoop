@@ -27,7 +27,10 @@ impl RawOutput {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0);
-        Self { filter, start_epoch_ns }
+        Self {
+            filter,
+            start_epoch_ns,
+        }
     }
 
     /// Write a single event to stdout.

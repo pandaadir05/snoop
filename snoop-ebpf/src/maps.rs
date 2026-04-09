@@ -7,7 +7,9 @@ use aya_ebpf::{
     macros::map,
     maps::{Array, HashMap, PerCpuArray, RingBuf},
 };
-use snoop_common::{LibCallEvent, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN, TLS_DATA_MAX};
+use snoop_common::{
+    LibCallEvent, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN, TLS_DATA_MAX,
+};
 
 /// Ring buffer used to forward completed `SyscallEvent`s to userspace.
 ///
@@ -44,8 +46,7 @@ pub(crate) static EXTRA_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024,
 /// Per-CPU scratch buffer used to read path strings from user memory without
 /// consuming the 512-byte BPF stack.  One entry of PATH_MAX_LEN bytes per CPU.
 #[map]
-pub(crate) static PATH_BUF: PerCpuArray<[u8; PATH_MAX_LEN]> =
-    PerCpuArray::with_max_entries(1, 0);
+pub(crate) static PATH_BUF: PerCpuArray<[u8; PATH_MAX_LEN]> = PerCpuArray::with_max_entries(1, 0);
 
 /// Per-CPU scratch buffer used to read sockaddr structs from user memory.
 /// Sized to SOCKADDR_MAX_LEN (28 bytes — enough for IPv6 sockaddr_in6).
@@ -63,20 +64,17 @@ pub(crate) static LIB_EVENTS: RingBuf = RingBuf::with_byte_size(2 * 1024 * 1024,
 /// Per-thread scratch for `ssl_write_enter` / `ssl_read_enter`.
 /// Stores the buffer pointer and length so the exit probe can read the data.
 #[map]
-pub(crate) static SSL_ENTER: HashMap<u64, SslEnterData> =
-    HashMap::with_max_entries(4096, 0);
+pub(crate) static SSL_ENTER: HashMap<u64, SslEnterData> = HashMap::with_max_entries(4096, 0);
 
 /// Per-thread scratch for the ltrace entry probes.
 /// Stores args and entry timestamp so the exit probe can emit a full event.
 #[map]
-pub(crate) static LTRACE_ENTER: HashMap<u64, LtraceEnterData> =
-    HashMap::with_max_entries(4096, 0);
+pub(crate) static LTRACE_ENTER: HashMap<u64, LtraceEnterData> = HashMap::with_max_entries(4096, 0);
 
 /// Per-CPU scratch buffer used to read TLS plaintext from user memory.
 /// Sized to TLS_DATA_MAX to avoid putting 256 bytes on the BPF stack.
 #[map]
-pub(crate) static TLS_BUF: PerCpuArray<[u8; TLS_DATA_MAX]> =
-    PerCpuArray::with_max_entries(1, 0);
+pub(crate) static TLS_BUF: PerCpuArray<[u8; TLS_DATA_MAX]> = PerCpuArray::with_max_entries(1, 0);
 
 /// Entry data saved by SSL uprobe at function entry.
 #[repr(C)]

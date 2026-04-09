@@ -19,15 +19,17 @@
 //! emit events for the traced process tree.
 
 use aya_ebpf::{
-    helpers::{bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_user_bytes},
+    helpers::{
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_user_bytes,
+    },
     macros::{uprobe, uretprobe},
     programs::{ProbeContext, RetProbeContext},
 };
 use snoop_common::{LibCallEvent, LibFunc, TLS_DATA_MAX};
 
 use crate::maps::{
-    EXTRA_PIDS, LIB_EVENTS, LTRACE_ENTER, SSL_ENTER, TARGET_PID, TLS_BUF,
-    LtraceEnterData, SslEnterData,
+    LtraceEnterData, SslEnterData, EXTRA_PIDS, LIB_EVENTS, LTRACE_ENTER, SSL_ENTER, TARGET_PID,
+    TLS_BUF,
 };
 
 // ── PID filter helper ─────────────────────────────────────────────────────────
@@ -230,21 +232,18 @@ fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
                 }
             };
 
-            let dest = unsafe {
-                core::slice::from_raw_parts_mut(scratch as *mut u8, want)
-            };
+            let dest = unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, want) };
 
-            let written = if unsafe {
-                bpf_probe_read_user_bytes(enter.buf_ptr as *const u8, dest)
-            }.is_ok() {
-                unsafe {
-                    let data_dst = core::ptr::addr_of_mut!((*ev).data) as *mut u8;
-                    core::ptr::copy_nonoverlapping(scratch as *const u8, data_dst, want);
-                }
-                want as u16
-            } else {
-                0u16
-            };
+            let written =
+                if unsafe { bpf_probe_read_user_bytes(enter.buf_ptr as *const u8, dest) }.is_ok() {
+                    unsafe {
+                        let data_dst = core::ptr::addr_of_mut!((*ev).data) as *mut u8;
+                        core::ptr::copy_nonoverlapping(scratch as *const u8, data_dst, want);
+                    }
+                    want as u16
+                } else {
+                    0u16
+                };
             written
         } else {
             0u16

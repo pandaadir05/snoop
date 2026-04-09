@@ -19,10 +19,7 @@
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use aya::{
-    programs::UProbe,
-    Ebpf,
-};
+use aya::{programs::UProbe, Ebpf};
 
 // ── public config type ────────────────────────────────────────────────────────
 
@@ -70,15 +67,14 @@ pub fn attach_uprobes(ebpf: &mut Ebpf, config: &UprobeConfig, pid: u32) -> Resul
     }
 
     if config.ltrace {
-        let libc = find_library(pid, "libc")
-            .context(
-                "could not find libc in the target process.\n\
+        let libc = find_library(pid, "libc").context(
+            "could not find libc in the target process.\n\
                  Statically linked binaries do not support ltrace mode.",
-            )?;
+        )?;
 
         for func in &["malloc", "free", "calloc", "realloc"] {
             let enter_prog = format!("ltrace_{func}");
-            let exit_prog  = format!("ltrace_{func}_ret");
+            let exit_prog = format!("ltrace_{func}_ret");
             attach_uprobe(ebpf, &enter_prog, &libc, func)?;
             attach_uretprobe(ebpf, &exit_prog, &libc, func)?;
         }
@@ -123,9 +119,7 @@ pub fn find_library(pid: u32, name_pattern: &str) -> Result<PathBuf> {
         }
     }
 
-    bail!(
-        "library matching {name_pattern:?} not found in /proc/{pid}/maps"
-    )
+    bail!("library matching {name_pattern:?} not found in /proc/{pid}/maps")
 }
 
 // ── aya helpers ───────────────────────────────────────────────────────────────
@@ -198,8 +192,16 @@ mod tests {
     #[test]
     fn uprobe_config_any_enabled() {
         assert!(!UprobeConfig::default().any_enabled());
-        assert!(UprobeConfig { tls: true, ltrace: false }.any_enabled());
-        assert!(UprobeConfig { tls: false, ltrace: true }.any_enabled());
+        assert!(UprobeConfig {
+            tls: true,
+            ltrace: false
+        }
+        .any_enabled());
+        assert!(UprobeConfig {
+            tls: false,
+            ltrace: true
+        }
+        .any_enabled());
     }
 
     /// Smoke-test the maps parser against a synthetic /proc/pid/maps snippet.

@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use aya::{
     include_bytes_aligned,
     maps::Array,
-    programs::{TracePoint, ProgramError},
+    programs::{ProgramError, TracePoint},
     Ebpf,
 };
 
@@ -20,8 +20,7 @@ use aya::{
 /// places the object in `$OUT_DIR/snoop-ebpf`.  This static ensures the
 /// object is always available without an external file dependency.
 #[cfg(target_os = "linux")]
-static SNOOP_EBPF_BYTES: &[u8] =
-    include_bytes_aligned!(concat!(env!("OUT_DIR"), "/snoop-ebpf"));
+static SNOOP_EBPF_BYTES: &[u8] = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/snoop-ebpf"));
 
 /// Load the eBPF object and attach the tracepoints.
 ///
@@ -85,7 +84,8 @@ fn attach_tracepoint(
         .try_into()
         .with_context(|| format!("program `{prog_name}` is not a TracePoint"))?;
 
-    prog.load().with_context(|| format!("failed to load `{prog_name}`"))?;
+    prog.load()
+        .with_context(|| format!("failed to load `{prog_name}`"))?;
 
     prog.attach(category, tp_name)
         .map(|_link| ())

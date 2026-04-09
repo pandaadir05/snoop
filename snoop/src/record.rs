@@ -131,18 +131,21 @@ impl TraceReader {
 
 fn read_header(r: &mut impl Read) -> Result<()> {
     let mut magic = [0u8; 8];
-    r.read_exact(&mut magic).context("failed to read trace header")?;
+    r.read_exact(&mut magic)
+        .context("failed to read trace header")?;
     if &magic != MAGIC {
         bail!("not a snoop trace file (bad magic bytes)");
     }
     let mut ver_buf = [0u8; 2];
-    r.read_exact(&mut ver_buf).context("failed to read trace version")?;
+    r.read_exact(&mut ver_buf)
+        .context("failed to read trace version")?;
     let version = u16::from_le_bytes(ver_buf);
     if version != VERSION {
         bail!("unsupported trace version {version} (this snoop understands version {VERSION})");
     }
     let mut reserved = [0u8; 6];
-    r.read_exact(&mut reserved).context("failed to read trace header reserved bytes")?;
+    r.read_exact(&mut reserved)
+        .context("failed to read trace header reserved bytes")?;
     Ok(())
 }
 

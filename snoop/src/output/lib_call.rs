@@ -25,14 +25,14 @@ pub fn write_raw(event: &LibCallEvent) -> io::Result<()> {
 /// Format a `LibCallEvent` as a single display line.
 pub fn format_raw(event: &LibCallEvent) -> String {
     let elapsed_us = event.enter_ns / 1000;
-    let secs    = elapsed_us / 1_000_000;
-    let micros  = elapsed_us % 1_000_000;
-    let dur_ms  = event.duration_ns() as f64 / 1_000_000.0;
-    let comm    = comm_to_string(&event.comm);
+    let secs = elapsed_us / 1_000_000;
+    let micros = elapsed_us % 1_000_000;
+    let dur_ms = event.duration_ns() as f64 / 1_000_000.0;
+    let comm = comm_to_string(&event.comm);
 
     let func_name = event.lib_func().map(|f| f.name()).unwrap_or("?");
-    let args_str  = format_args(event);
-    let ret_str   = format_ret(event);
+    let args_str = format_args(event);
+    let ret_str = format_ret(event);
 
     format!(
         "[{secs:>6}.{micros:06}] {comm}({pid}/{tid}) [{func_name}]({args_str}) = {ret_str} <{dur_ms:.3}ms>",
@@ -48,7 +48,10 @@ pub fn format_args(event: &LibCallEvent) -> String {
         Some(LibFunc::SslWrite) => {
             let len = args[2];
             if event.data_len > 0 {
-                format!("{len} B, data=[{}…]", hex_preview(&event.data, event.data_len))
+                format!(
+                    "{len} B, data=[{}…]",
+                    hex_preview(&event.data, event.data_len)
+                )
             } else {
                 format!("{len} B")
             }
@@ -61,7 +64,7 @@ pub fn format_args(event: &LibCallEvent) -> String {
             }
         }
         Some(LibFunc::Malloc) => format!("{}", args[0]),
-        Some(LibFunc::Free)   => format!("{:#x}", args[0]),
+        Some(LibFunc::Free) => format!("{:#x}", args[0]),
         Some(LibFunc::Calloc) => format!("{} × {}", args[0], args[1]),
         Some(LibFunc::Realloc) => format!("{:#x}, {}", args[0], args[1]),
         None => format!("{:#x}", args[0]),
@@ -105,9 +108,9 @@ fn hex_preview(data: &[u8; 256], data_len: u16) -> String {
 /// Write a `LibCallEvent` as a JSON Lines object to stdout.
 pub fn write_json(event: &LibCallEvent) -> io::Result<()> {
     let func_name = event.lib_func().map(|f| f.name()).unwrap_or("unknown");
-    let comm      = comm_to_string(&event.comm);
-    let dur_ns    = event.duration_ns();
-    let ret       = event.ret;
+    let comm = comm_to_string(&event.comm);
+    let dur_ns = event.duration_ns();
+    let ret = event.ret;
 
     // Inline the data as a hex string when present.
     let data_hex = if event.data_len > 0 {
@@ -139,12 +142,12 @@ pub fn write_json(event: &LibCallEvent) -> io::Result<()> {
 /// from syscalls (e.g. `[SSL_write]` vs `openat`).
 pub fn tui_name(func: LibFunc) -> &'static str {
     match func {
-        LibFunc::SslWrite  => "[SSL_write]",
-        LibFunc::SslRead   => "[SSL_read]",
-        LibFunc::Malloc    => "[malloc]",
-        LibFunc::Free      => "[free]",
-        LibFunc::Calloc    => "[calloc]",
-        LibFunc::Realloc   => "[realloc]",
+        LibFunc::SslWrite => "[SSL_write]",
+        LibFunc::SslRead => "[SSL_read]",
+        LibFunc::Malloc => "[malloc]",
+        LibFunc::Free => "[free]",
+        LibFunc::Calloc => "[calloc]",
+        LibFunc::Realloc => "[realloc]",
     }
 }
 
@@ -160,7 +163,7 @@ mod tests {
             func: func as u8,
             _pad: [0; 3],
             enter_ns: 1_000_000_000,
-            exit_ns:  1_000_020_000,
+            exit_ns: 1_000_020_000,
             comm: *b"nginx\0\0\0\0\0\0\0\0\0\0\0",
             args: [0, 0, data.len() as u64, 0, 0, 0],
             ret,

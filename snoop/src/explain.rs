@@ -413,12 +413,18 @@ impl Explainer {
         if let Some(f) = self.open_files.get(&(pid, old_fd)).cloned() {
             self.open_files.insert(
                 (pid, new_fd),
-                OpenFile { path: f.path.clone(), ..f },
+                OpenFile {
+                    path: f.path.clone(),
+                    ..f
+                },
             );
         } else if let Some(s) = self.sockets.get(&(pid, old_fd)).cloned() {
             self.sockets.insert(
                 (pid, new_fd),
-                Socket { peer: s.peer.clone(), ..s },
+                Socket {
+                    peer: s.peer.clone(),
+                    ..s
+                },
             );
         }
     }
@@ -526,8 +532,14 @@ pub(crate) fn decode_sockaddr(bytes: &[u8], _fallback_ptr: u64) -> String {
             });
             let addr = format!(
                 "{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}:{:x}",
-                groups[0], groups[1], groups[2], groups[3],
-                groups[4], groups[5], groups[6], groups[7],
+                groups[0],
+                groups[1],
+                groups[2],
+                groups[3],
+                groups[4],
+                groups[5],
+                groups[6],
+                groups[7],
             );
             format!("[{addr}]:{port}")
         }
@@ -589,7 +601,12 @@ mod tests {
     fn file_read_lifecycle() {
         let mut ex = Explainer::new();
         // open → fd 5
-        let acts = ex.push(&make_event(SyscallNr::OPENAT, [0, 0, 0, 0, 0, 0], 5, "/etc/hosts"));
+        let acts = ex.push(&make_event(
+            SyscallNr::OPENAT,
+            [0, 0, 0, 0, 0, 0],
+            5,
+            "/etc/hosts",
+        ));
         assert!(acts.is_empty());
         // read 512 bytes
         let acts = ex.push(&make_event(SyscallNr::READ, [5, 0, 512, 0, 0, 0], 512, ""));

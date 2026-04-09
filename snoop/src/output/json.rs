@@ -51,17 +51,17 @@ impl JsonOutput {
         // All string values are JSON-escaped with `json_escape`.
         format!(
             r#"{{"ts_ns":{ts},"pid":{pid},"tid":{tid},"uid":{uid},"gid":{gid},"comm":{comm},"syscall":{name},"args":{args},"ret":{ret_str},"ret_raw":{ret_raw},"duration_ns":{dur}}}"#,
-            ts      = e.timestamp_ns,
-            pid     = e.pid,
-            tid     = e.tid,
-            uid     = raw.uid,
-            gid     = raw.gid,
-            comm    = json_str(&e.comm),
-            name    = json_str(e.name),
-            args    = json_str(&e.args_str),
+            ts = e.timestamp_ns,
+            pid = e.pid,
+            tid = e.tid,
+            uid = raw.uid,
+            gid = raw.gid,
+            comm = json_str(&e.comm),
+            name = json_str(e.name),
+            args = json_str(&e.args_str),
             ret_str = json_str(&e.ret_str),
             ret_raw = raw.ret,
-            dur     = e.duration_ns,
+            dur = e.duration_ns,
         )
     }
 }
@@ -72,7 +72,7 @@ fn json_str(s: &str) -> String {
     out.push('"');
     for c in s.chars() {
         match c {
-            '"'  => out.push_str("\\\""),
+            '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
