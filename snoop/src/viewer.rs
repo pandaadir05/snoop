@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::{
     filter::Filter,
-    output::{json::JsonOutput, raw::RawOutput, tui::TuiApp, OutputMode},
+    output::{explain::ExplainOutput, json::JsonOutput, raw::RawOutput, tui::TuiApp, OutputMode},
     record::TraceReader,
 };
 
@@ -35,6 +35,13 @@ pub async fn run(path: &Path, filter: Filter, mode: OutputMode) -> Result<()> {
             while let Some(event) = reader.next_event()? {
                 out.handle(&event)?;
             }
+        }
+        OutputMode::Explain => {
+            let mut out = ExplainOutput::new(filter);
+            while let Some(event) = reader.next_event()? {
+                out.handle(&event)?;
+            }
+            out.flush()?;
         }
         OutputMode::Tui => {
             // Feed events through a channel so the existing TuiApp code is

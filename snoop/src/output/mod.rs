@@ -1,5 +1,6 @@
 //! Output modes.
 
+pub mod explain;
 pub mod json;
 pub mod raw;
 pub mod tui;
@@ -13,4 +14,6 @@ pub enum OutputMode {
     Tui,
     /// JSON objects, one per line (NDJSON / JSON Lines).
     Json,
+    /// High-level activity summaries (explain mode).
+    Explain,
 }

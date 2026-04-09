@@ -62,6 +62,18 @@ pub struct Cli {
     #[arg(long)]
     pub json: bool,
 
+    /// Show high-level activity summaries instead of raw syscall lines.
+    ///
+    /// Groups related syscalls (open/read/close, connect/send/recv) into
+    /// single human-readable lines.  Example:
+    ///
+    /// ```text
+    /// READ  /etc/passwd  ↓1.2 KB  (2 calls, 0.80ms)
+    /// NET   127.0.0.1:8080  ↑512 B ↓4.0 KB  (18.20ms)
+    /// ```
+    #[arg(long, conflicts_with_all = ["json", "raw"])]
+    pub explain: bool,
+
     // ── filtering ──────────────────────────────────────────────────────────
 
     /// Restrict output to file-system syscalls.
@@ -165,12 +177,16 @@ pub enum Command {
         file: PathBuf,
 
         /// Print strace-compatible one-line output instead of the TUI.
-        #[arg(long, conflicts_with = "json")]
+        #[arg(long, conflicts_with_all = ["json", "explain"])]
         raw: bool,
 
         /// Emit one JSON object per syscall.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["raw", "explain"])]
         json: bool,
+
+        /// Show high-level activity summaries (explain mode).
+        #[arg(long, conflicts_with_all = ["json", "raw"])]
+        explain: bool,
 
         /// Restrict output to file-system syscalls.
         #[arg(long, conflicts_with_all = ["net"])]
@@ -211,6 +227,7 @@ impl Cli {
                 file,
                 raw,
                 json,
+                explain,
                 files,
                 net,
                 slow,
@@ -226,6 +243,8 @@ impl Cli {
                 };
                 let mode = if json {
                     OutputMode::Json
+                } else if explain {
+                    OutputMode::Explain
                 } else if raw || !is_tty() {
                     OutputMode::Raw
                 } else {
@@ -309,6 +328,8 @@ impl Cli {
     fn output_mode(&self) -> OutputMode {
         if self.json {
             OutputMode::Json
+        } else if self.explain {
+            OutputMode::Explain
         } else if self.raw || !is_tty() {
             OutputMode::Raw
         } else {
