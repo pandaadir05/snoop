@@ -1,5 +1,6 @@
 //! High-level tracer that orchestrates loading, consuming, and outputting.
 
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Stdio;
 
@@ -24,9 +25,13 @@ use crate::{
 
 // ── public trace entry points ─────────────────────────────────────────────────
 
-/// Spawn a new process and trace it.
+/// Spawn a new process and trace it from its very first syscall.
 ///
-/// Always enables follow mode so children are also traced.
+/// Uses `ptrace(PTRACE_TRACEME)` in the child's pre-exec hook so the child
+/// stops at exec entry before executing any syscalls.  eBPF is loaded while
+/// the child is stopped, then `ptrace(PTRACE_DETACH)` resumes it.  This
+/// eliminates the race window that exists when eBPF is attached after the
+/// child has already started running.
 pub async fn spawn(
     cmd: &[String],
     filter: Filter,
@@ -39,20 +44,50 @@ pub async fn spawn(
         bail!("no command specified");
     }
 
-    let mut child = tokio::process::Command::new(&cmd[0])
+    let mut command = tokio::process::Command::new(&cmd[0]);
+    command
         .args(&cmd[1..])
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    // Safety: ptrace(PTRACE_TRACEME, ...) is async-signal-safe and may be
+    // called between fork() and exec() without restriction.  On success the
+    // child will receive a SIGTRAP at exec entry and stop, allowing the parent
+    // to load eBPF before any user code runs.
+    unsafe {
+        command.pre_exec(|| {
+            let rc = libc::ptrace(
+                libc::PTRACE_TRACEME,
+                0,
+                std::ptr::null_mut::<libc::c_void>(),
+                std::ptr::null_mut::<libc::c_void>(),
+            );
+            if rc != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to spawn `{}`", cmd[0]))?;
 
     let pid = child.id().context("child process has already exited")?;
 
+    // Block until the child stops at exec entry (SIGTRAP).  This is a brief
+    // synchronous wait — the child stops almost immediately.
+    wait_for_stop(pid)?;
+
+    // Load eBPF while the child is stopped — no syscalls are missed.
     let mut ebpf = loader::load(pid, true, ebpf_obj)?;
     if uprobes.any_enabled() {
         crate::uprobe::attach_uprobes(&mut ebpf, &uprobes, pid)?;
     }
+
+    // Detach ptrace and let the child run; eBPF takes over from here.
+    detach_ptrace(pid)?;
 
     // Extract LIB_EVENTS *before* moving ebpf — take_map gives us owned MapData
     // so there are no lifetime ties to the Ebpf object afterwards.
@@ -416,6 +451,47 @@ async fn watch_pid(pid: u32, done: watch::Sender<bool>) {
 
 fn process_exists(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Block until `pid` stops (WIFSTOPPED).
+///
+/// Called after spawning with `PTRACE_TRACEME`; the child stops at exec entry
+/// with a SIGTRAP.  The call returns almost immediately in practice.
+fn wait_for_stop(pid: u32) -> Result<()> {
+    let mut status: libc::c_int = 0;
+    let rc = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, 0) };
+    if rc < 0 {
+        let err = std::io::Error::last_os_error();
+        bail!("waitpid({pid}) failed: {err}");
+    }
+    if unsafe { libc::WIFSTOPPED(status) } {
+        return Ok(());
+    }
+    // Unexpected: child exited before we could attach.
+    bail!(
+        "child process (pid {pid}) exited before eBPF could be attached \
+         (waitpid status={status:#x})"
+    );
+}
+
+/// Detach ptrace from `pid`, resuming normal execution.
+///
+/// After this call the process runs freely; all further observation is through
+/// eBPF rather than ptrace.
+fn detach_ptrace(pid: u32) -> Result<()> {
+    let rc = unsafe {
+        libc::ptrace(
+            libc::PTRACE_DETACH,
+            pid as libc::pid_t,
+            std::ptr::null_mut::<libc::c_void>(),
+            std::ptr::null_mut::<libc::c_void>(),
+        )
+    };
+    if rc < 0 {
+        let err = std::io::Error::last_os_error();
+        bail!("ptrace(PTRACE_DETACH, {pid}) failed: {err}");
+    }
+    Ok(())
 }
 
 // ── record mode ───────────────────────────────────────────────────────────────
