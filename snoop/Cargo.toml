@@ -37,7 +37,5 @@ aya-log = "0.2"
 tempfile = "3"
 
 [build-dependencies]
-# aya-build runs a sub-cargo that compiles snoop-ebpf for bpfel-unknown-none.
-# It is only invoked when building on Linux; on other hosts the build script
-# is a no-op.  See build.rs.
-aya-build = "0.1"
+# build.rs invokes cargo +nightly directly to compile snoop-ebpf for
+# bpfel-unknown-none and copies the result to OUT_DIR/snoop-ebpf.
