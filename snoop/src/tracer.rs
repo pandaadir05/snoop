@@ -113,6 +113,7 @@ pub async fn spawn(
 }
 
 /// Attach to an existing process by PID.
+#[allow(clippy::too_many_arguments)]
 pub async fn attach(
     pid: u32,
     follow: bool,
@@ -254,6 +255,7 @@ async fn consume_ring_buf(
 // ── output dispatch ───────────────────────────────────────────────────────────
 
 /// Drive the output layer until the user quits or the trace ends.
+#[allow(clippy::too_many_arguments)]
 async fn run_output(
     rx: mpsc::Receiver<SyscallEvent>,
     lib_rx: Option<mpsc::Receiver<LibCallEvent>>,

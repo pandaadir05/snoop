@@ -5,7 +5,7 @@
 //! [14:23:01.234567] nginx(1234/1234) openat(AT_FDCWD, 0x7fff…, O_RDONLY) = 5 <0.043ms>
 //! ```
 
-use std::io::{self, BufWriter, Write};
+use std::io::{self, Write};
 
 use snoop_common::SyscallEvent;
 
