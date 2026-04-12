@@ -269,8 +269,7 @@ async fn consume_ring_buf(
                 log::warn!("short ring-buffer item ({} bytes), skipping", item.len());
                 continue;
             }
-            let event =
-                unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent) };
+            let event = unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent) };
             if tx.send(event).await.is_err() {
                 return Ok(()); // receiver dropped — output layer exited
             }
@@ -281,9 +280,8 @@ async fn consume_ring_buf(
             // Final drain — pick up any stragglers.
             while let Some(item) = ring_buf.next() {
                 if item.len() >= std::mem::size_of::<SyscallEvent>() {
-                    let event = unsafe {
-                        std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent)
-                    };
+                    let event =
+                        unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent) };
                     let _ = tx.send(event).await;
                 }
             }

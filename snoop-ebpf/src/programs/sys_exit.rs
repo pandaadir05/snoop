@@ -322,8 +322,7 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
             // Compile-time-constant offset and size — the verifier checks
             // (base + SLOT_OFF + SLOT) ≤ ringbuf_size in O(1).
             const SLOT_OFF: usize = $slot_idx * SLOT;
-            let dest =
-                unsafe { core::slice::from_raw_parts_mut(base.add(SLOT_OFF), SLOT) };
+            let dest = unsafe { core::slice::from_raw_parts_mut(base.add(SLOT_OFF), SLOT) };
             match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, dest) } {
                 Ok(s) if !s.is_empty() => {
                     end = (SLOT_OFF + s.len()) as u16;
