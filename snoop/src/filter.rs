@@ -5,16 +5,11 @@
 
 use snoop_common::{SyscallEvent, SyscallNr};
 
-// A few syscall numbers not yet in snoop_common (will migrate there later).
-const NR_CREAT: SyscallNr = SyscallNr(85);
-const NR_SOCKETPAIR: SyscallNr = SyscallNr(53);
-const NR_SHUTDOWN: SyscallNr = SyscallNr(48);
-
 /// The set of syscalls considered file-system operations.
 const FS_SYSCALLS: &[SyscallNr] = &[
     SyscallNr::OPEN,
     SyscallNr::OPENAT,
-    NR_CREAT,
+    SyscallNr::CREAT,
     SyscallNr::READ,
     SyscallNr::WRITE,
     SyscallNr::PREAD64,
@@ -60,7 +55,7 @@ const FS_SYSCALLS: &[SyscallNr] = &[
 /// The set of syscalls considered network operations.
 const NET_SYSCALLS: &[SyscallNr] = &[
     SyscallNr::SOCKET,
-    NR_SOCKETPAIR,
+    SyscallNr::SOCKETPAIR,
     SyscallNr::BIND,
     SyscallNr::LISTEN,
     SyscallNr::ACCEPT,
@@ -74,7 +69,7 @@ const NET_SYSCALLS: &[SyscallNr] = &[
     SyscallNr::GETPEERNAME,
     SyscallNr::SETSOCKOPT,
     SyscallNr::GETSOCKOPT,
-    NR_SHUTDOWN,
+    SyscallNr::SHUTDOWN,
 ];
 
 /// Configures which events are forwarded to the output layer.
