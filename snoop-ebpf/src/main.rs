@@ -26,11 +26,13 @@ mod programs;
 
 // no_std binaries must supply a panic handler.  In BPF programs panics are
 // unreachable at runtime — the verifier rejects loops and the generated code
-// never calls panic infrastructure — so an infinite loop is the correct body.
+// never calls panic infrastructure.  We use unreachable_unchecked() instead
+// of loop {} because the 5.15 verifier (used by WSL2) rejects the self-loop
+// instruction that loop {} compiles to.
 #[cfg(target_arch = "bpf")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
+    unsafe { core::hint::unreachable_unchecked() }
 }
 
 /// Host-only stub so `cargo build` succeeds outside the BPF toolchain.
