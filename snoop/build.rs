@@ -92,6 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "nightly",
             "cargo",
             "build",
+            "--release",
             "--package",
             "snoop-ebpf",
             "--target",
@@ -119,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let compiled = ebpf_target_dir
         .join("bpfel-unknown-none")
-        .join("debug")
+        .join("release")
         .join("snoop-ebpf");
 
     std::fs::copy(&compiled, &out_file).map_err(|e| {
