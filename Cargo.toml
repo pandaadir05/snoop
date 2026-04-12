@@ -21,3 +21,14 @@ strip = "symbols"
 
 [profile.dev]
 opt-level = 1   # avoid extremely slow debug builds on large dep trees
+
+# The BPF verifier on kernel 5.15 (WSL2) follows all code paths including
+# panic/unreachable branches.  opt-level >= 2 lets LLVM eliminate those dead
+# paths so the verifier never sees the self-loop instruction.
+[profile.dev.package.snoop-ebpf]
+opt-level = 2
+codegen-units = 1
+
+[profile.release.package.snoop-ebpf]
+opt-level = 2
+codegen-units = 1

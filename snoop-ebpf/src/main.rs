@@ -25,14 +25,14 @@ mod maps;
 mod programs;
 
 // no_std binaries must supply a panic handler.  In BPF programs panics are
-// unreachable at runtime — the verifier rejects loops and the generated code
-// never calls panic infrastructure.  We use unreachable_unchecked() instead
-// of loop {} because the 5.15 verifier (used by WSL2) rejects the self-loop
-// instruction that loop {} compiles to.
+// unreachable at runtime -- the verifier rejects code paths that reach here.
+// The workspace Cargo.toml sets opt-level >= 2 for this crate so LLVM
+// eliminates panic paths entirely; on 5.15 kernels (WSL2) the verifier would
+// otherwise reject the self-loop instruction this compiles to.
 #[cfg(target_arch = "bpf")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    unsafe { core::hint::unreachable_unchecked() }
+    loop {}
 }
 
 /// Host-only stub so `cargo build` succeeds outside the BPF toolchain.
