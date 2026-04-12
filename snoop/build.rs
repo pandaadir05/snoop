@@ -52,9 +52,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── 2. pre-built object ───────────────────────────────────────────────────
     if let Ok(obj_path) = std::env::var("SNOOP_EBPF_OBJ") {
-        println!("cargo:rerun-if-changed={obj_path}");
+        // The path must be absolute: build scripts run from a directory chosen
+        // by Cargo, not the workspace root, so relative paths will not resolve.
+        let obj_path = std::path::Path::new(&obj_path)
+            .canonicalize()
+            .map_err(|e| format!("SNOOP_EBPF_OBJ={obj_path}: {e}"))?;
+        println!("cargo:rerun-if-changed={}", obj_path.display());
         std::fs::copy(&obj_path, &out_file).map_err(|e| {
-            format!("failed to copy SNOOP_EBPF_OBJ ({obj_path}) to {}: {e}", out_file.display())
+            format!(
+                "failed to copy {} to {}: {e}",
+                obj_path.display(),
+                out_file.display()
+            )
         })?;
         return Ok(());
     }

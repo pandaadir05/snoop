@@ -148,7 +148,7 @@ jobs:
       - name: Cross-compile snoop for aarch64
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
-          # Point build.rs at the object compiled by the xtask step above so
-          # it does not try to re-invoke nightly cargo during the stable build.
-          SNOOP_EBPF_OBJ: target/bpfel-unknown-none/release/snoop-ebpf
+          # Absolute path to the object compiled by the xtask step above.
+          # build.rs copies it to OUT_DIR instead of re-invoking nightly cargo.
+          SNOOP_EBPF_OBJ: ${{ github.workspace }}/target/bpfel-unknown-none/release/snoop-ebpf
         run: cargo build --package snoop --target aarch64-unknown-linux-musl --release
