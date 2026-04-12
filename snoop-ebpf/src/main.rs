@@ -24,15 +24,17 @@ mod maps;
 #[cfg(target_arch = "bpf")]
 mod programs;
 
-// no_std binaries must supply a panic handler.  In BPF programs panics are
-// unreachable at runtime -- the verifier rejects code paths that reach here.
-// The workspace Cargo.toml sets opt-level >= 2 for this crate so LLVM
-// eliminates panic paths entirely; on 5.15 kernels (WSL2) the verifier would
-// otherwise reject the self-loop instruction this compiles to.
+// no_std binaries must supply a panic handler.  In BPF programs panics should
+// never happen at runtime.  We emit a proper BPF exit instruction via inline
+// asm instead of loop{} because the 5.15 kernel verifier (WSL2) requires
+// every code path to terminate with `exit`, and rejects `goto pc-1` as an
+// infinite loop.
 #[cfg(target_arch = "bpf")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
+    unsafe {
+        core::arch::asm!("r0 = 0", "exit", options(noreturn));
+    }
 }
 
 /// Host-only stub so `cargo build` succeeds outside the BPF toolchain.
