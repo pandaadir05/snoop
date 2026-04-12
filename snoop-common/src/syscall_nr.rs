@@ -94,6 +94,7 @@ impl SyscallNr {
     pub const GETDENTS64: Self = Self(217);
     pub const PRLIMIT64: Self = Self(302);
     pub const GETRANDOM: Self = Self(318);
+
     pub const MEMFD_CREATE: Self = Self(319);
     pub const FTRUNCATE: Self = Self(77);
     pub const TRUNCATE: Self = Self(76);
@@ -117,6 +118,8 @@ impl SyscallNr {
     pub const SIGNALFD4: Self = Self(289);
     pub const TIMERFD_CREATE: Self = Self(283);
     pub const INOTIFY_INIT1: Self = Self(294);
+    pub const CREAT: Self = Self(85);
+    pub const SHUTDOWN: Self = Self(48);
     pub const SOCKETPAIR: Self = Self(53);
     pub const READV: Self = Self(19);
     pub const WRITEV: Self = Self(20);
@@ -132,5 +135,4 @@ impl SyscallNr {
     pub const MSYNC: Self = Self(26);
     pub const MLOCK: Self = Self(149);
     pub const MUNLOCK: Self = Self(150);
-    pub const PRLIMIT: Self = Self(302);
 }
