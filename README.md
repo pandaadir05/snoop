@@ -1,11 +1,19 @@
 # snoop
 
 [![CI](https://github.com/pandaadir05/snoop/actions/workflows/ci.yml/badge.svg)](https://github.com/pandaadir05/snoop/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
 
 A syscall tracer for Linux, built on eBPF. Like strace but with a live TUI,
 smart filters, and argument decoding you can actually read.
 
-```
+<!-- TODO: replace with asciinema/GIF once recorded on Linux
+     Suggested command:  asciinema rec -c "sudo snoop curl https://example.com" demo.cast
+     Then: agg demo.cast demo.gif  (https://github.com/asciinema/agg)
+     Or use vhs (https://github.com/charmbracelet/vhs) with a .tape file.
+-->
+![snoop TUI demo — coming soon](https://placehold.co/800x400?text=TUI+demo+coming+soon)
+
+```text
 $ sudo snoop curl https://example.com
 [   0.001] curl(1234/1234)  openat(AT_FDCWD, "/etc/ssl/certs/ca-certificates.crt", O_RDONLY) = 4  <0.031ms>
 [   0.002] curl(1234/1234)  read(4, 0x7f3a1c000b20, 4096) = 4096  <0.012ms>
@@ -16,7 +24,7 @@ $ sudo snoop curl https://example.com
 
 Or run it without `--raw` and get a full-screen TUI:
 
-```
+```text
  snoop  pid:1234  comm:curl  events:142  elapsed:0.341s
 ┌── syscall stream ─────────────────────────────────────┐┌── top syscalls ─────────┐
 │ [  0.001] curl  openat("/etc/ssl/…") = 4  <0.031ms>  ││ syscall       count  pct│
@@ -119,7 +127,7 @@ every call individually:
 sudo snoop -p 1234 --explain
 ```
 
-```
+```text
 READ   /etc/passwd          ↓1.2 KB   (2 calls, 0.80ms)
 NET    127.0.0.1:5432       ↑512 B ↓4.0 KB   (18.20ms)
 EXEC   /usr/bin/python3
@@ -162,7 +170,7 @@ sudo snoop record -p 1234 -o after.snoop
 snoop diff before.snoop after.snoop
 ```
 
-```
+```text
 SYSCALL COUNTS
   read      1200 → 1800  (+50.0%)  ▲
   openat     340 →  210  (-38.2%)  ▼
@@ -188,7 +196,7 @@ sudo snoop -p 1234 --flamegraph syscalls.svg
 
 ## Flags
 
-```
+```text
   -p, --pid <PID>           Attach to a running process
       --follow              Trace forked children (requires --pid)
       --docker <NAME|ID>    Trace all processes in a Docker container
@@ -215,7 +223,7 @@ sudo snoop -p 1234 --flamegraph syscalls.svg
 ## TUI keybindings
 
 | Key | Action |
-|---|---|
+| --- | --- |
 | `q` | Quit |
 | `Space` | Pause / resume |
 | `/` | Incremental search |
@@ -236,7 +244,7 @@ return value gets paired with the entry data and pushed to a ring buffer.
 Userspace drains the ring buffer over an async fd and runs everything through
 the filter/decode pipeline.
 
-```
+```text
 kernel                               userspace
 ──────                               ─────────
 raw_syscalls/sys_enter  ──►  SYSCALL_ENTER map (per-tid scratch)
@@ -280,7 +288,7 @@ cargo xtask run -- -p $$
 ## Stack
 
 | Layer | Crate |
-|---|---|
+| --- | --- |
 | eBPF programs | `aya-ebpf` |
 | eBPF loader | `aya` |
 | TUI | `ratatui` + `crossterm` |
