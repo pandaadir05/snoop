@@ -260,7 +260,7 @@ fn take_events_ring_buf(ebpf: &mut aya::Ebpf) -> Result<RingBuf<MapData>> {
 async fn consume_ring_buf(
     mut ring_buf: RingBuf<MapData>,
     tx: mpsc::Sender<SyscallEvent>,
-    mut done: watch::Receiver<bool>,
+    done: watch::Receiver<bool>,
 ) -> Result<()> {
     loop {
         // Drain all available events.
