@@ -38,7 +38,7 @@ use crate::maps::{
 /// Returns `false` when the current PID is NOT in the trace scope.
 #[inline(always)]
 fn pid_allowed(pid: u32) -> bool {
-    if let Some(&target) = unsafe { TARGET_PID.get(0) } {
+    if let Some(&target) = TARGET_PID.get(0) {
         if target != 0 && pid != target {
             return unsafe { EXTRA_PIDS.get(&pid) }.is_some();
         }
@@ -53,7 +53,7 @@ fn pid_allowed(pid: u32) -> bool {
 /// Saves `buf` and `num` in `SSL_ENTER` for the exit probe to read.
 #[uprobe]
 pub fn ssl_write_enter(ctx: ProbeContext) -> u32 {
-    match try_ssl_enter(&ctx, true) {
+    match try_ssl_enter(&ctx) {
         Ok(()) => 0,
         Err(_) => 0,
     }
@@ -73,7 +73,7 @@ pub fn ssl_write_exit(ctx: RetProbeContext) -> u32 {
 /// Uprobe on `SSL_read(SSL *ssl, void *buf, int num)`.
 #[uprobe]
 pub fn ssl_read_enter(ctx: ProbeContext) -> u32 {
-    match try_ssl_enter(&ctx, false) {
+    match try_ssl_enter(&ctx) {
         Ok(()) => 0,
         Err(_) => 0,
     }
@@ -140,10 +140,10 @@ pub fn ltrace_realloc_ret(ctx: RetProbeContext) -> u32 {
 
 /// Common entry logic for `SSL_write` and `SSL_read`.
 ///
-/// Saves the data buffer pointer and declared length in `SSL_ENTER`.
-/// `_is_write` is currently unused but retained for future differentiation.
+/// Saves the data buffer pointer and declared length in `SSL_ENTER` keyed by
+/// pid_tgid so the matching exit probe can retrieve them.
 #[inline(always)]
-fn try_ssl_enter(ctx: &ProbeContext, _is_write: bool) -> Result<(), i64> {
+fn try_ssl_enter(ctx: &ProbeContext) -> Result<(), i64> {
     let pid_tgid = bpf_get_current_pid_tgid();
     let pid = (pid_tgid >> 32) as u32;
 
@@ -153,19 +153,19 @@ fn try_ssl_enter(ctx: &ProbeContext, _is_write: bool) -> Result<(), i64> {
 
     // SSL_write(ssl*, buf*, num) / SSL_read(ssl*, buf*, num)
     // arg(0) = SSL*  arg(1) = buf*  arg(2) = num
-    let buf_ptr: u64 = unsafe { ctx.arg(1) }.unwrap_or(0);
-    let num: u64 = unsafe { ctx.arg::<u64>(2) }.unwrap_or(0);
+    let buf_ptr: u64 = ctx.arg(1).unwrap_or(0);
+    let num: u64 = ctx.arg::<u64>(2).unwrap_or(0);
 
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     let data = SslEnterData {
         buf_ptr,
         num,
-        enter_ns: bpf_ktime_get_ns(),
+        enter_ns: unsafe { bpf_ktime_get_ns() },
         comm,
     };
 
-    unsafe { SSL_ENTER.insert(&pid_tgid, &data, 0) }.map_err(|e| e as i64)?;
+    SSL_ENTER.insert(&pid_tgid, &data, 0).map_err(|e| e as i64)?;
     Ok(())
 }
 
@@ -183,12 +183,12 @@ fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
         Some(d) => *d,
         None => return Ok(()),
     };
-    let _ = unsafe { SSL_ENTER.remove(&pid_tgid) };
+    let _ = SSL_ENTER.remove(&pid_tgid);
 
     let ret: i64 = ctx.ret().unwrap_or(-1);
-    let exit_ns = bpf_ktime_get_ns();
+    let exit_ns = unsafe { bpf_ktime_get_ns() };
 
-    let mut rb_entry = match unsafe { LIB_EVENTS.reserve::<LibCallEvent>(0) } {
+    let mut rb_entry = match LIB_EVENTS.reserve::<LibCallEvent>(0) {
         Some(e) => e,
         None => return Ok(()),
     };
@@ -223,7 +223,7 @@ fn try_ssl_exit(ctx: &RetProbeContext, func: u8) -> Result<(), i64> {
         };
 
         if want > 0 {
-            let scratch: *mut [u8; TLS_DATA_MAX] = match unsafe { TLS_BUF.get_ptr_mut(0) } {
+            let scratch: *mut [u8; TLS_DATA_MAX] = match TLS_BUF.get_ptr_mut(0) {
                 Some(p) => p,
                 None => {
                     unsafe { core::ptr::addr_of_mut!((*ev).data_len).write(0) };
@@ -273,12 +273,12 @@ fn ltrace_enter_impl(ctx: &ProbeContext, func: u8) -> u32 {
     }
 
     let args: [u64; 6] = [
-        unsafe { ctx.arg(0) }.unwrap_or(0),
-        unsafe { ctx.arg(1) }.unwrap_or(0),
-        unsafe { ctx.arg(2) }.unwrap_or(0),
-        unsafe { ctx.arg(3) }.unwrap_or(0),
-        unsafe { ctx.arg(4) }.unwrap_or(0),
-        unsafe { ctx.arg(5) }.unwrap_or(0),
+        ctx.arg(0).unwrap_or(0),
+        ctx.arg(1).unwrap_or(0),
+        ctx.arg(2).unwrap_or(0),
+        ctx.arg(3).unwrap_or(0),
+        ctx.arg(4).unwrap_or(0),
+        ctx.arg(5).unwrap_or(0),
     ];
 
     let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
@@ -289,11 +289,11 @@ fn ltrace_enter_impl(ctx: &ProbeContext, func: u8) -> u32 {
 
     let data = LtraceEnterData {
         args,
-        enter_ns: bpf_ktime_get_ns(),
+        enter_ns: unsafe { bpf_ktime_get_ns() },
         comm,
     };
 
-    let _ = unsafe { LTRACE_ENTER.insert(&key, &data, 0) };
+    let _ = LTRACE_ENTER.insert(&key, &data, 0);
     0
 }
 
@@ -313,12 +313,12 @@ fn ltrace_exit_impl(ctx: &RetProbeContext, func: u8) -> u32 {
         Some(d) => *d,
         None => return 0,
     };
-    let _ = unsafe { LTRACE_ENTER.remove(&key) };
+    let _ = LTRACE_ENTER.remove(&key);
 
     let ret: i64 = ctx.ret().unwrap_or(0);
-    let exit_ns = bpf_ktime_get_ns();
+    let exit_ns = unsafe { bpf_ktime_get_ns() };
 
-    let mut rb_entry = match unsafe { LIB_EVENTS.reserve::<LibCallEvent>(0) } {
+    let mut rb_entry = match LIB_EVENTS.reserve::<LibCallEvent>(0) {
         Some(e) => e,
         None => return 0,
     };
