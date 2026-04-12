@@ -102,6 +102,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .env("CARGO_TARGET_DIR", &ebpf_target_dir)
         // Don't inherit host RUSTFLAGS — they may contain flags invalid for BPF.
         .env_remove("RUSTFLAGS")
+        // Cargo sets RUSTC/RUSTC_WRAPPER in build-script environments, pointing
+        // at the *host* (stable) toolchain.  Remove them so the child cargo
+        // picks up the nightly rustc from the toolchain we select below.
+        .env_remove("RUSTC")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         // Force nightly even when the workspace rust-toolchain.toml pins stable.
         .env("RUSTUP_TOOLCHAIN", "nightly")
         .current_dir(workspace_root)
