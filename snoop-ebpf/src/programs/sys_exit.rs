@@ -98,13 +98,18 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
         }
     }
 
+    // Pre-zero argv_extra so gaps between fixed-size slots contain zeroes
+    // (ring buffer memory is uninitialised).  This must happen before capture
+    // so that the null-separated format is correct even with padding between
+    // slots.
+    unsafe {
+        core::ptr::addr_of_mut!((*ev).argv_extra).write_bytes(0, 1);
+    }
+
     // For execve/execveat, attempt to capture extra argv strings (argv[1..]).
     let argv_extra_len = capture_argv_extra(&enter, ev);
     unsafe {
         core::ptr::addr_of_mut!((*ev).argv_extra_len).write(argv_extra_len);
-        if argv_extra_len == 0 {
-            core::ptr::addr_of_mut!((*ev).argv_extra).write_bytes(0, 1);
-        }
     }
 
     rb_entry.submit(0);
@@ -256,26 +261,23 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent, ret: i6
 
 /// Capture extra argv strings (argv[1], argv[2], argv[3]) for execve/execveat.
 ///
-/// The captured bytes are written into the ring buffer entry's `argv_extra`
-/// field as null-separated strings: `"arg1\x00arg2\x00arg3\x00"`.  Userspace
-/// splits on `\x00` to reconstruct the individual arguments.
+/// Each argument is read into a fixed-size slot within `argv_extra` at a
+/// compile-time-known offset.  This avoids dynamic pointer arithmetic
+/// (`base.add(total)`) whose bounds the BPF verifier on kernel 5.15 cannot
+/// prove stay within the ring buffer reservation:
 ///
-/// Returns the total number of bytes written (including all null terminators),
+///   max(offset) + max(remaining) ≠ constant  in the verifier's model,
+///   because it doesn't track cross-register algebraic relationships.
+///
+/// With fixed slots the verifier checks each `bpf_probe_read_user_str` call
+/// against a constant offset + constant size, which always passes.
+///
+/// Callers must pre-zero `argv_extra` so that gaps between a string's null
+/// terminator and the next slot boundary are clean zeros.  Userspace splits
+/// on `\x00` and filters empty chunks to recover the strings.
+///
+/// Returns the byte offset just past the last meaningful character written,
 /// or 0 if the syscall is not execve/execveat or no args could be read.
-///
-/// # Verifier complexity
-///
-/// The previous implementation used a per-CPU scratch buffer and
-/// `copy_nonoverlapping` to move bytes from scratch to ring buffer at a
-/// *dynamically-accumulated* destination offset (`dst.add(total)`).  The
-/// verifier had to enumerate O(ARGV_EXTRA_MAX²) states for the inner copy loop
-/// because both the destination offset AND the copy length were unknown at
-/// compile time, overflowing the 1 000 000-instruction limit.
-///
-/// The fix: read each argument string directly from userspace into the ring
-/// buffer via `bpf_probe_read_user_str_bytes`.  This is a single BPF helper
-/// call; the verifier analyses it in O(1) regardless of string length,
-/// completely eliminating the copy loop.
 #[inline(always)]
 fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
     use aya_ebpf::helpers::bpf_probe_read_user_str_bytes;
@@ -292,13 +294,17 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
     }
 
     let base: *mut u8 = unsafe { core::ptr::addr_of_mut!((*ev).argv_extra) as *mut u8 };
-    let mut total: usize = 0;
+    let mut end: u16 = 0;
 
-    // Manually unrolled: capture argv[1], argv[2], argv[3].
-    macro_rules! read_arg {
-        ($idx:expr) => {{
-            // Read the pointer value at argv[$idx] (8 bytes on 64-bit).
-            let ptr_addr = argv_ptr + ($idx as u64) * 8;
+    // Fixed slot size — three slots fit within ARGV_EXTRA_MAX (128 / 3 = 42,
+    // last 2 bytes unused).
+    const SLOT: usize = ARGV_EXTRA_MAX / 3; // 42
+
+    // Read argv[$argv_idx] into slot $slot_idx at compile-time offset.
+    macro_rules! read_arg_slot {
+        ($argv_idx:expr, $slot_idx:expr) => {{
+            // Read the pointer value at argv[$argv_idx] (8 bytes on 64-bit).
+            let ptr_addr = argv_ptr + ($argv_idx as u64) * 8;
             let mut arg_ptr: u64 = 0;
             let ptr_bytes = unsafe {
                 core::slice::from_raw_parts_mut(
@@ -307,39 +313,29 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
                 )
             };
             if unsafe { bpf_probe_read_user_buf(ptr_addr as *const u8, ptr_bytes) }.is_err() {
-                return total as u16;
+                return end;
             }
             if arg_ptr == 0 {
-                return total as u16; // end of argv[]
+                return end; // end of argv[]
             }
 
-            let remaining = ARGV_EXTRA_MAX.saturating_sub(total);
-            if remaining == 0 {
-                return total as u16;
-            }
-
-            // Read the argument string DIRECTLY from userspace into ring buffer
-            // memory at the current write position.  No scratch buffer, no copy
-            // loop — a single BPF helper call the verifier checks in O(1).
+            // Compile-time-constant offset and size — the verifier checks
+            // (base + SLOT_OFF + SLOT) ≤ ringbuf_size in O(1).
+            const SLOT_OFF: usize = $slot_idx * SLOT;
             let dest =
-                unsafe { core::slice::from_raw_parts_mut(base.add(total), remaining) };
-            let written =
-                match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, dest) } {
-                    Ok(s) => s.len(),
-                    Err(_) => return total as u16,
-                };
-            if written == 0 {
-                return total as u16;
+                unsafe { core::slice::from_raw_parts_mut(base.add(SLOT_OFF), SLOT) };
+            match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, dest) } {
+                Ok(s) if !s.is_empty() => {
+                    end = (SLOT_OFF + s.len()) as u16;
+                }
+                _ => return end,
             }
-            // bpf_probe_read_user_str_bytes appends a null terminator that acts
-            // as the field separator for userspace.
-            total += written;
         }};
     }
 
-    read_arg!(1);
-    read_arg!(2);
-    read_arg!(3);
+    read_arg_slot!(1, 0);
+    read_arg_slot!(2, 1);
+    read_arg_slot!(3, 2);
 
-    total as u16
+    end
 }
