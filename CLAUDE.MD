@@ -38,7 +38,7 @@ Cargo workspace:
 - Never commit secrets, binaries, or editor cruft.
 
 ## Workflow expectations
-- Before starting any task, read PLAN.md and the relevant section of ROADMAP.md.
+- Before starting any task, read ROADMAP.md for context on what's planned.
 - After finishing a task, append a short entry to DEVLOG.md with date, what
   changed, and any decisions made.
 - Never make architectural changes without proposing them first.

@@ -1,8 +1,9 @@
 # snoop
 
-A syscall tracer for Linux built on eBPF. Think strace, but with a live TUI,
-smart filters, human-readable argument decoding, and output that doesn't make
-you want to reach for awk.
+[![CI](https://github.com/pandaadir05/snoop/actions/workflows/ci.yml/badge.svg)](https://github.com/pandaadir05/snoop/actions/workflows/ci.yml)
+
+A syscall tracer for Linux, built on eBPF. Like strace but with a live TUI,
+smart filters, and argument decoding you can actually read.
 
 ```
 $ sudo snoop curl https://example.com
@@ -13,7 +14,7 @@ $ sudo snoop curl https://example.com
 [   0.046] curl(1234/1234)  sendto(5, 0x55a3bc001b40, 78, MSG_NOSIGNAL) = 78  <0.011ms>
 ```
 
-Or drop into the full-screen TUI and watch everything live:
+Or run it without `--raw` and get a full-screen TUI:
 
 ```
  snoop  pid:1234  comm:curl  events:142  elapsed:0.341s
@@ -27,42 +28,44 @@ Or drop into the full-screen TUI and watch everything live:
  [q]uit  [Space]pause  [/]search  [f]iles  [n]et  [c]lear  [↑↓]scroll  [G]bottom
 ```
 
-## Why snoop
+## Why not just use strace?
 
-strace works, but it was designed for a different era. snoop is built on eBPF,
-which means kernel-level tracing with negligible overhead — no ptrace, no
-stopping your process, no signal noise. Arguments are decoded into readable
-strings rather than raw hex. The TUI updates in real time, filters apply
-instantly, and the whole trace can be saved to disk and replayed later without
-root.
+strace uses ptrace, which stops your process on every syscall. snoop uses eBPF
+tracepoints instead -- your process keeps running at full speed with the tracing
+happening in-kernel. Beyond performance, snoop decodes arguments into something
+you can actually read, has a real-time TUI, and can save/replay/diff traces.
 
-## Features
+## What it does
 
-- Live full-screen TUI with a real-time top-syscalls panel
-- strace-compatible single-line output (`--raw`) for piping
-- JSON Lines output (`--json`) for `jq` and log ingestion
-- Explain mode (`--explain`) — groups syscalls into semantic activity summaries
-- Filter by category: `--files`, `--net`
-- Filter by latency: `--slow 10` (only calls over 10 ms)
-- Filter by name: `--syscall openat --syscall read`
-- Argument decoding for 60+ syscalls — paths, flags, socket addresses
-- Attach to a running process (`-p PID`) or spawn a new one (`snoop <cmd>`)
-- Follow forked children with `--follow`
-- Container-aware: `--docker <name>` and `--pod <name>` target all processes
-  inside a container without knowing their PIDs
-- TLS plaintext capture via uprobes on `SSL_write` / `SSL_read` (`--tls`)
-- Heap allocation tracing (`--ltrace`) — `malloc` / `free` / `calloc` / `realloc`
-- Record a trace to disk (`snoop record`) and replay it later (`snoop view`)
-- Compare two trace files (`snoop diff`) to spot performance regressions
-- Flamegraph SVG export (`--flamegraph out.svg`)
-- No kernel modules, no C toolchain — the eBPF programs are pure Rust (aya)
-  and are embedded in the binary at build time
+- **TUI** -- live scrollable syscall stream with a top-syscalls panel, search,
+  category filters, pause/resume. Falls back to strace-style line output when
+  stdout isn't a terminal.
+- **Output formats** -- `--raw` (strace-compatible), `--json` (JSON Lines for
+  jq), `--explain` (groups syscalls into high-level activity summaries)
+- **Filters** -- `--files`, `--net`, `--slow 10`, `--syscall openat`
+- **Arg decoding** for 60+ syscalls -- paths, flags, socket addresses, all the
+  stuff you'd normally have to look up in the man page
+- **Attach** to a running process (`-p PID`) or **spawn** one (`snoop <cmd>`)
+- `--follow` traces forked children too
+- **Containers** -- `--docker <name>` and `--pod <name>` trace everything
+  inside a container
+- **TLS capture** -- `--tls` hooks `SSL_write`/`SSL_read` via uprobes to show
+  plaintext
+- **Heap tracing** -- `--ltrace` tracks `malloc`/`free`/`calloc`/`realloc`
+- **Record & replay** -- `snoop record` saves to disk, `snoop view` replays
+  offline (no root needed)
+- **Diff** -- `snoop diff before.snoop after.snoop` shows what changed between
+  two runs
+- **Flamegraph** -- `--flamegraph out.svg`
+
+No kernel modules, no C toolchain. The eBPF programs are pure Rust (aya) and
+ship embedded in the binary.
 
 ## Requirements
 
-- Linux kernel 5.8 or later (BPF ring buffer support)
-- `x86_64` or `aarch64`
-- Root or `CAP_BPF` + `CAP_PERFMON`
+- Linux 5.8+ (needs BPF ring buffer support)
+- x86_64 or aarch64
+- Root, or `CAP_BPF` + `CAP_PERFMON`
 
 ## Installation
 
@@ -79,63 +82,38 @@ For aarch64, replace `x86_64` with `aarch64`.
 ### From source
 
 ```bash
-# Requires Rust stable (userspace) + Rust nightly (eBPF target)
 cargo install --git https://github.com/pandaadir05/snoop snoop
 ```
 
-The build script compiles the eBPF programs automatically — no C toolchain or
-kernel headers needed.
+This builds the eBPF programs automatically. No C toolchain or kernel headers
+needed, just Rust.
 
 ## Usage
 
-### Spawn and trace a command
-
 ```bash
+# Trace a command
 sudo snoop ls /etc
 sudo snoop -- nginx -g 'daemon off;'
-```
 
-### Attach to a running process
-
-```bash
+# Attach to a running process
 sudo snoop -p $(pidof postgres)
-sudo snoop -p 1234 --follow        # also trace forked children
-```
+sudo snoop -p 1234 --follow        # trace forked children too
 
-### Trace a Docker container
-
-```bash
-sudo snoop --docker my-nginx       # container name or ID
-sudo snoop --docker abc123def456
-```
-
-### Trace a Kubernetes pod
-
-```bash
-sudo snoop --pod my-app-pod
+# Containers
+sudo snoop --docker my-nginx
 sudo snoop --pod my-app-pod --namespace production
-```
 
-### Filter the output
-
-```bash
-# File-system syscalls only
-sudo snoop -p 1234 --files
-
-# Network syscalls only
-sudo snoop -p 1234 --net
-
-# Calls slower than 5 ms
-sudo snoop -p 1234 --slow 5
-
-# Only openat and read
+# Filtering
+sudo snoop -p 1234 --files         # only file-system calls
+sudo snoop -p 1234 --net           # only network calls
+sudo snoop -p 1234 --slow 5        # only calls slower than 5ms
 sudo snoop -p 1234 --syscall openat --syscall read
 ```
 
-### Explain mode — semantic summaries
+### Explain mode
 
-Instead of one line per syscall, `--explain` groups activity into readable
-summaries:
+`--explain` groups raw syscalls into high-level summaries instead of showing
+every call individually:
 
 ```bash
 sudo snoop -p 1234 --explain
@@ -149,12 +127,13 @@ EXEC   /usr/bin/python3
 
 ### TLS decryption
 
+Hooks `SSL_write`/`SSL_read` in OpenSSL to capture plaintext:
+
 ```bash
-# Capture SSL_write / SSL_read plaintext (requires OpenSSL in the target)
 sudo snoop -p 1234 --tls
 ```
 
-### Heap allocation tracing
+### Heap tracing
 
 ```bash
 sudo snoop -p 1234 --ltrace
@@ -162,16 +141,18 @@ sudo snoop -p 1234 --ltrace
 
 ### Record and replay
 
+Record a trace, then replay it later without root:
+
 ```bash
-# Record to a file (requires root)
 sudo snoop record -p 1234 -o trace.snoop
 
-# Replay later — no root needed
 snoop view trace.snoop
 snoop view trace.snoop --files --slow 5 --json | jq 'select(.name=="read")'
 ```
 
-### Compare two traces
+### Diff two traces
+
+Useful for spotting regressions after a deploy:
 
 ```bash
 sudo snoop record -p 1234 -o before.snoop
@@ -203,10 +184,9 @@ sudo snoop -p 1234 --json | jq 'select(.name == "connect")'
 
 ```bash
 sudo snoop -p 1234 --flamegraph syscalls.svg
-xdg-open syscalls.svg
 ```
 
-## All flags
+## Flags
 
 ```
   -p, --pid <PID>           Attach to a running process
@@ -250,12 +230,11 @@ xdg-open syscalls.svg
 
 ## How it works
 
-snoop attaches eBPF programs to the `raw_syscalls/sys_enter` and
-`raw_syscalls/sys_exit` tracepoints. On entry it records the syscall number
-and arguments into a per-thread scratch map; on exit it reads the return value,
-pairs it with the entry data, and writes a complete event to a ring buffer. The
-userspace daemon reads from the ring buffer via an async file descriptor and
-pushes events through the filter and decode pipeline before rendering them.
+Two eBPF programs attach to `raw_syscalls/sys_enter` and `sys_exit`. On entry,
+the syscall number and arguments go into a per-thread scratch map. On exit, the
+return value gets paired with the entry data and pushed to a ring buffer.
+Userspace drains the ring buffer over an async fd and runs everything through
+the filter/decode pipeline.
 
 ```
 kernel                               userspace
@@ -270,48 +249,32 @@ raw_syscalls/sys_exit   ──►  EVENTS ring buffer (4 MiB)
                  (one line/syscall)   (ratatui TUI)
 ```
 
-The eBPF programs are written in Rust using [aya](https://github.com/aya-rs/aya)
-and compiled to BPF bytecode at build time. The resulting object is embedded
-directly in the snoop binary, so there are no runtime file dependencies and no
-kernel headers required.
+eBPF programs are written in Rust with [aya](https://github.com/aya-rs/aya),
+compiled to BPF bytecode at build time, and embedded in the binary. No runtime
+dependencies, no kernel headers.
 
 ## Building from source
 
 ```bash
-# Clone the repo
 git clone https://github.com/pandaadir05/snoop
 cd snoop
 
-# Install Rust nightly (needed for the BPF target only)
+# Nightly is only needed for the BPF target
 rustup toolchain install nightly
 rustup component add rust-src --toolchain nightly
 
-# Install bpf-linker (links the eBPF object — no LLVM installation needed)
+# bpf-linker links the eBPF object (no system LLVM needed)
 cargo install bpf-linker --no-default-features
 
-# Build eBPF programs
 cargo xtask build-ebpf
-
-# Build the userspace binary
 cargo build --release
-
-# Run
 sudo ./target/release/snoop -p $$
 ```
 
-For development there is a shortcut that builds the eBPF programs and runs
-snoop in one step:
+During development you can build and run in one step:
 
 ```bash
 cargo xtask run -- -p $$
-```
-
-Formatting and linting:
-
-```bash
-cargo fmt --all
-cargo clippy --workspace --exclude snoop-ebpf -- -D warnings
-cargo test --workspace --exclude snoop-ebpf
 ```
 
 ## Stack
@@ -327,5 +290,4 @@ cargo test --workspace --exclude snoop-ebpf
 
 ## License
 
-Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT), at your option.
+MIT or Apache-2.0, at your option.

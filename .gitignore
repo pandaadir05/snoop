@@ -20,5 +20,11 @@ Thumbs.db
 .env
 .env.*
 
+# AI assistant config
+.claude/
+
+# Internal planning docs
+PLAN.MD
+
 # Benchmark artifacts
 criterion/
