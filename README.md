@@ -6,12 +6,7 @@
 A syscall tracer for Linux, built on eBPF. Like strace but with a live TUI,
 smart filters, and argument decoding you can actually read.
 
-<!-- TODO: replace with asciinema/GIF once recorded on Linux
-     Suggested command:  asciinema rec -c "sudo snoop curl https://example.com" demo.cast
-     Then: agg demo.cast demo.gif  (https://github.com/asciinema/agg)
-     Or use vhs (https://github.com/charmbracelet/vhs) with a .tape file.
--->
-![snoop TUI demo — coming soon](https://placehold.co/800x400?text=TUI+demo+coming+soon)
+![snoop TUI demo](demo.gif)
 
 ```text
 $ sudo snoop curl https://example.com
