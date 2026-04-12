@@ -13,7 +13,7 @@
 //! ```
 
 use aya_ebpf::{
-    helpers::{bpf_ktime_get_ns, bpf_probe_read_user_bytes, bpf_probe_read_user_str_bytes},
+    helpers::{bpf_ktime_get_ns, bpf_probe_read_user_buf, bpf_probe_read_user_str_bytes},
     macros::tracepoint,
     programs::TracePointContext,
 };
@@ -38,7 +38,7 @@ pub fn sys_exit(ctx: TracePointContext) -> i64 {
 fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
     use aya_ebpf::helpers::bpf_get_current_pid_tgid;
 
-    let id = unsafe { bpf_get_current_pid_tgid() };
+    let id = bpf_get_current_pid_tgid();
 
     // Copy the entry record from the scratch map (≤ 96 bytes, stack-safe).
     let enter = match unsafe { SYSCALL_ENTER.get(&id) } {
@@ -47,7 +47,7 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
     };
 
     // Remove the scratch entry now to free the slot for future syscalls.
-    let _ = unsafe { SYSCALL_ENTER.remove(&id) };
+    let _ = SYSCALL_ENTER.remove(&id);
 
     let ret: i64 = unsafe { ctx.read_at(16) }.map_err(|e| e as i64)?;
     let exit_ns = unsafe { bpf_ktime_get_ns() };
@@ -55,7 +55,7 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
     // Reserve ring buffer memory for the event.  The SyscallEvent (~280 bytes)
     // lives in ring buffer memory, NOT on the BPF stack, so it doesn't count
     // against the 512-byte stack limit.
-    let mut rb_entry = match unsafe { EVENTS.reserve::<SyscallEvent>(0) } {
+    let mut rb_entry = match EVENTS.reserve::<SyscallEvent>(0) {
         Some(e) => e,
         None => return Ok(()),
     };
@@ -88,7 +88,7 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
     }
 
     // Attempt to capture the sockaddr argument for socket syscalls.
-    let sa_len = capture_sockaddr_arg(&enter, ev);
+    let sa_len = capture_sockaddr_arg(&enter, ev, ret);
     unsafe {
         core::ptr::addr_of_mut!((*ev).sockaddr_len).write(sa_len);
         if sa_len == 0 {
@@ -109,7 +109,7 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
 /// into `EXTRA_PIDS` so subsequent syscalls from that process are captured.
 #[inline(always)]
 fn maybe_follow_child(syscall_nr: i64, ret: i64) {
-    let follow = match unsafe { FOLLOW_MODE.get(0) } {
+    let follow = match FOLLOW_MODE.get(0) {
         Some(f) => *f,
         None => return,
     };
@@ -129,7 +129,7 @@ fn maybe_follow_child(syscall_nr: i64, ret: i64) {
     }
 
     let child_pid = ret as u32;
-    let _ = unsafe { EXTRA_PIDS.insert(&child_pid, &1u8, 0) };
+    let _ = EXTRA_PIDS.insert(&child_pid, &1u8, 0);
 }
 
 /// Determine the path argument for this syscall and read it from user memory
@@ -154,7 +154,7 @@ fn capture_path_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
         return 0;
     }
 
-    let scratch: *mut [u8; PATH_MAX_LEN] = match unsafe { PATH_BUF.get_ptr_mut(0) } {
+    let scratch: *mut [u8; PATH_MAX_LEN] = match PATH_BUF.get_ptr_mut(0) {
         Some(p) => p,
         None => return 0,
     };
@@ -196,7 +196,7 @@ fn capture_path_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
 /// use that as the read length (clamped to SOCKADDR_MAX_LEN).  On failure
 /// we fall back to reading SOCKADDR_MAX_LEN bytes which is safe.
 #[inline(always)]
-fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u8 {
+fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent, ret: i64) -> u8 {
     // Determine the sockaddr pointer and length source.
     let sa_ptr = enter.args[1] as *const u8;
     if sa_ptr.is_null() {
@@ -213,7 +213,7 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u8 {
         // syscall numbers: accept=43, accept4=288, getpeername=52, getsockname=51
         43 | 51 | 52 | 288 => {
             // Only valid after the call succeeds (ret >= 0).
-            if enter.ret < 0 {
+            if ret < 0 {
                 return 0;
             }
             let len_ptr = enter.args[2] as *const u32;
@@ -227,7 +227,7 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u8 {
                     core::mem::size_of::<u32>(),
                 )
             };
-            if unsafe { bpf_probe_read_user_bytes(len_ptr as *const u8, len_bytes) }.is_err() {
+            if unsafe { bpf_probe_read_user_buf(len_ptr as *const u8, len_bytes) }.is_err() {
                 SOCKADDR_MAX_LEN
             } else {
                 (len_val as usize).min(SOCKADDR_MAX_LEN)
@@ -240,14 +240,14 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u8 {
         return 0;
     }
 
-    let scratch: *mut [u8; SOCKADDR_MAX_LEN] = match unsafe { SOCKADDR_BUF.get_ptr_mut(0) } {
+    let scratch: *mut [u8; SOCKADDR_MAX_LEN] = match SOCKADDR_BUF.get_ptr_mut(0) {
         Some(p) => p,
         None => return 0,
     };
 
     let dest: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, read_len) };
 
-    if unsafe { bpf_probe_read_user_bytes(sa_ptr, dest) }.is_err() {
+    if unsafe { bpf_probe_read_user_buf(sa_ptr, dest) }.is_err() {
         return 0;
     }
 

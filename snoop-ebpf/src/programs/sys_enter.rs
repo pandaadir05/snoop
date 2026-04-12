@@ -38,14 +38,14 @@ pub fn sys_enter(ctx: TracePointContext) -> i64 {
 
 #[inline(always)]
 fn try_sys_enter(ctx: &TracePointContext) -> Result<(), i64> {
-    let id = unsafe { bpf_get_current_pid_tgid() };
+    let id = bpf_get_current_pid_tgid();
     let pid = (id >> 32) as u32;
     let tid = id as u32;
 
     // Apply PID filter.  TARGET_PID[0] == 0 means trace all.
     // Otherwise the process must match TARGET_PID or appear in EXTRA_PIDS
     // (the latter is populated by sys_exit when --follow is active).
-    if let Some(&target) = unsafe { TARGET_PID.get(0) } {
+    if let Some(&target) = TARGET_PID.get(0) {
         if target != 0 && pid != target {
             let in_extra = unsafe { EXTRA_PIDS.get(&pid) }.is_some();
             if !in_extra {
@@ -59,12 +59,11 @@ fn try_sys_enter(ctx: &TracePointContext) -> Result<(), i64> {
     let syscall_nr: i64 = unsafe { ctx.read_at(8) }.map_err(|e| e as i64)?;
     let args: [u64; 6] = unsafe { ctx.read_at(16) }.map_err(|e| e as i64)?;
 
-    let uid_gid = unsafe { bpf_get_current_uid_gid() };
+    let uid_gid = bpf_get_current_uid_gid();
     let uid = uid_gid as u32;
     let gid = (uid_gid >> 32) as u32;
 
-    let mut comm = [0u8; 16];
-    let _ = unsafe { bpf_get_current_comm(&mut comm) };
+    let comm = bpf_get_current_comm().unwrap_or([0u8; 16]);
 
     let data = SyscallEnterData {
         pid,
@@ -79,7 +78,7 @@ fn try_sys_enter(ctx: &TracePointContext) -> Result<(), i64> {
 
     // Store entry data; overwrite any stale entry for the same tid (can
     // happen if sys_exit was missed for a previous call).
-    unsafe { SYSCALL_ENTER.insert(&id, &data, 0) }.map_err(|e| e as i64)?;
+    SYSCALL_ENTER.insert(&id, &data, 0).map_err(|e| e as i64)?;
 
     Ok(())
 }
