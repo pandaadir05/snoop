@@ -26,9 +26,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        run: |
+          for i in 1 2 3 4 5; do
+            rustup toolchain install stable \
+              --component rustfmt --component clippy \
+              --profile minimal --no-self-update && break
+            echo "attempt $i failed, retrying in 15s…"
+            sleep 15
+          done
+          rustup default stable
 
       - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
@@ -64,9 +70,14 @@ jobs:
       # is needed; do NOT add `targets:` here or rustup will fail trying to
       # download a component that does not exist.
       - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
+        run: |
+          for i in 1 2 3 4 5; do
+            rustup toolchain install nightly \
+              --component rust-src \
+              --profile minimal --no-self-update && break
+            echo "attempt $i failed, retrying in 15s…"
+            sleep 15
+          done
 
       - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
@@ -104,16 +115,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust stable + aarch64 target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-musl
+        run: |
+          for i in 1 2 3 4 5; do
+            rustup toolchain install stable \
+              --target aarch64-unknown-linux-musl \
+              --profile minimal --no-self-update && break
+            echo "attempt $i failed, retrying in 15s…"
+            sleep 15
+          done
+          rustup default stable
 
       # Same note as the ebpf job: BPF targets use -Z build-std=core, so only
       # rust-src is required — no `targets:` field.
       - name: Install Rust nightly (for eBPF)
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
+        run: |
+          for i in 1 2 3 4 5; do
+            rustup toolchain install nightly \
+              --component rust-src \
+              --profile minimal --no-self-update && break
+            echo "attempt $i failed, retrying in 15s…"
+            sleep 15
+          done
 
       - name: Install cross-compilation tools
         run: |
