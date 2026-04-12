@@ -5,7 +5,7 @@
 
 use aya_ebpf::{
     macros::map,
-    maps::{Array, HashMap, RingBuf},
+    maps::{Array, HashMap, PerCpuArray, RingBuf},
 };
 use snoop_common::{LibCallEvent, SyscallEnterData, SyscallEvent, TLS_DATA_MAX};
 
