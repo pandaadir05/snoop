@@ -44,9 +44,6 @@ jobs:
             sudo apt-get install -y gcc-aarch64-linux-gnu
           fi
 
-      - name: Install bpf-linker
-        run: cargo install bpf-linker --no-default-features
-
       - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
         with:
@@ -57,6 +54,19 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      # bpf-linker uses bundled LLVM; cache the binary to avoid recompiling it
+      # on every release.  Must be checked before the install step.
+      - name: Cache bpf-linker binary
+        id: cache-bpf-linker
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/bpf-linker
+          key: bpf-linker-${{ runner.os }}-bundled-v1
+
+      - name: Install bpf-linker
+        if: steps.cache-bpf-linker.outputs.cache-hit != 'true'
+        run: cargo install bpf-linker --locked
 
       - name: Build eBPF programs
         run: cargo xtask build-ebpf --release

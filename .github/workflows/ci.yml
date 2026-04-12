@@ -79,18 +79,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ebpf-
 
-      # bpf-linker bundles its own LLVM to avoid a system LLVM version
-      # dependency.  Cache the compiled binary so it is only built once.
+      # bpf-linker uses bundled LLVM to avoid a system LLVM version dependency.
+      # Cache the compiled binary so it is only built once per cache key bump.
       - name: Cache bpf-linker binary
         id: cache-bpf-linker
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/bpf-linker
-          key: bpf-linker-${{ runner.os }}-0.10.2
+          key: bpf-linker-${{ runner.os }}-bundled-v1
 
       - name: Install bpf-linker
         if: steps.cache-bpf-linker.outputs.cache-hit != 'true'
-        run: cargo install bpf-linker
+        run: cargo install bpf-linker --locked
 
       - name: Compile eBPF programs
         run: cargo xtask build-ebpf
@@ -120,20 +120,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
 
-      # bpf-linker bundles its own LLVM to avoid a system LLVM version
-      # dependency.  Cache the compiled binary so it is only built once.
-      - name: Cache bpf-linker binary
-        id: cache-bpf-linker
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin/bpf-linker
-          key: bpf-linker-${{ runner.os }}-0.10.2
-
-      - name: Install bpf-linker
-        if: steps.cache-bpf-linker.outputs.cache-hit != 'true'
-        run: cargo install bpf-linker
-
-      - name: Cache
+      - name: Cache cargo registry and build artifacts
         uses: actions/cache@v4
         with:
           path: |
@@ -142,6 +129,18 @@ jobs:
             target/
           key: ${{ runner.os }}-aarch64-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-aarch64-
+
+      # bpf-linker cache must be checked before the install step.
+      - name: Cache bpf-linker binary
+        id: cache-bpf-linker
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/bpf-linker
+          key: bpf-linker-${{ runner.os }}-bundled-v1
+
+      - name: Install bpf-linker
+        if: steps.cache-bpf-linker.outputs.cache-hit != 'true'
+        run: cargo install bpf-linker --locked
 
       - name: Build eBPF
         run: cargo xtask build-ebpf --release
