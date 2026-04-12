@@ -131,13 +131,12 @@ pub async fn attach(
     let lib_rx = take_lib_channel(&mut ebpf, &uprobes);
 
     let (tx, rx) = mpsc::channel(4096);
-    let (_done_tx, done_rx) = watch::channel(false);
-    let done_tx_clone = _done_tx.clone();
+    let (done_tx, done_rx) = watch::channel(false);
 
     tokio::select! {
         res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
         res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, Some(pid)) => res?,
-        _ = watch_pid(pid, done_tx_clone) => {}
+        _ = watch_pid(pid, done_tx.clone()) => {}
     }
 
     Ok(())
@@ -584,13 +583,12 @@ pub async fn record_attach(
 
     let ebpf = loader::load(pid, follow, ebpf_obj)?;
     let (tx, rx) = mpsc::channel(4096);
-    let (_done_tx, done_rx) = watch::channel(false);
-    let done_tx_clone = _done_tx.clone();
+    let (done_tx, done_rx) = watch::channel(false);
 
     tokio::select! {
         res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
         res = record_events(rx, done_rx, output_path.clone()) => res?,
-        _ = watch_pid(pid, done_tx_clone) => {}
+        _ = watch_pid(pid, done_tx.clone()) => {}
     }
 
     log::info!("trace written to {}", output_path.display());
