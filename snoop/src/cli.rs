@@ -158,6 +158,14 @@ pub struct Cli {
     #[arg(long)]
     pub ltrace: bool,
 
+    /// Tee raw/JSON output to FILE while the trace runs.
+    ///
+    /// Each event is written to FILE in the same format as stdout (raw lines
+    /// for `--raw`, JSON Lines for `--json`, raw lines for TUI mode).  The
+    /// file is created or truncated at startup.
+    #[arg(long, value_name = "FILE")]
+    pub output_file: Option<PathBuf>,
+
     /// Write a flamegraph SVG to PATH when the trace ends.
     #[arg(long, value_name = "PATH")]
     pub flamegraph: Option<PathBuf>,
@@ -399,6 +407,7 @@ impl Cli {
                     let filter = self.build_filter();
                     let mode = self.output_mode();
                     let flamegraph = self.flamegraph;
+                    let output_file = self.output_file;
                     let uprobes = UprobeConfig {
                         tls: self.tls,
                         ltrace: self.ltrace,
@@ -412,6 +421,7 @@ impl Cli {
                             filter,
                             mode,
                             flamegraph,
+                            output_file,
                             self.ebpf_obj,
                             uprobes,
                         )
@@ -424,6 +434,7 @@ impl Cli {
                             filter,
                             mode,
                             flamegraph,
+                            output_file,
                             self.ebpf_obj,
                             uprobes,
                         )
@@ -435,6 +446,7 @@ impl Cli {
                             filter,
                             mode,
                             flamegraph,
+                            output_file,
                             self.ebpf_obj,
                             uprobes,
                         )
@@ -445,6 +457,7 @@ impl Cli {
                             filter,
                             mode,
                             flamegraph,
+                            output_file,
                             self.ebpf_obj,
                             uprobes,
                         )

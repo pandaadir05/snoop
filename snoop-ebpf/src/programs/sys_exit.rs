@@ -17,9 +17,9 @@ use aya_ebpf::{
     macros::tracepoint,
     programs::TracePointContext,
 };
-use snoop_common::{SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
+use snoop_common::{ARGV_EXTRA_MAX, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
 
-use crate::maps::{EVENTS, EXTRA_PIDS, FOLLOW_MODE, PATH_BUF, SOCKADDR_BUF, SYSCALL_ENTER};
+use crate::maps::{ARGV_BUF, EVENTS, EXTRA_PIDS, FOLLOW_MODE, PATH_BUF, SOCKADDR_BUF, SYSCALL_ENTER};
 
 /// Tracepoint attached to `raw_syscalls/sys_exit`.
 ///
@@ -75,7 +75,7 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
         core::ptr::addr_of_mut!((*ev).enter_ns).write(enter.enter_ns);
         core::ptr::addr_of_mut!((*ev).exit_ns).write(exit_ns);
         core::ptr::addr_of_mut!((*ev).comm).write(enter.comm);
-        core::ptr::addr_of_mut!((*ev)._pad).write([0u8; 5]);
+        core::ptr::addr_of_mut!((*ev)._pad).write([0u8; 3]);
     }
 
     // Attempt to capture the first string argument for path-bearing syscalls.
@@ -93,6 +93,15 @@ fn try_sys_exit(ctx: &TracePointContext) -> Result<(), i64> {
         core::ptr::addr_of_mut!((*ev).sockaddr_len).write(sa_len);
         if sa_len == 0 {
             core::ptr::addr_of_mut!((*ev).sockaddr).write_bytes(0, 1);
+        }
+    }
+
+    // For execve/execveat, attempt to capture extra argv strings (argv[1..]).
+    let argv_extra_len = capture_argv_extra(&enter, ev);
+    unsafe {
+        core::ptr::addr_of_mut!((*ev).argv_extra_len).write(argv_extra_len);
+        if argv_extra_len == 0 {
+            core::ptr::addr_of_mut!((*ev).argv_extra).write_bytes(0, 1);
         }
     }
 
@@ -257,4 +266,103 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent, ret: i6
     }
 
     read_len as u8
+}
+
+/// Capture extra argv strings (argv[1], argv[2], argv[3]) for execve/execveat.
+///
+/// The captured bytes are written into the ring buffer entry's `argv_extra`
+/// field as null-separated strings: `"arg1\x00arg2\x00arg3\x00"`.  Userspace
+/// splits on `\x00` to reconstruct the individual arguments.
+///
+/// Returns the total number of bytes written (including all null terminators),
+/// or 0 if the syscall is not execve/execveat or no args could be read.
+///
+/// BPF verifier notes:
+/// - The loop is manually unrolled to a fixed count (3 args) so the verifier
+///   sees no dynamic loop bounds.
+/// - All buffer accesses use the per-CPU ARGV_BUF scratch to avoid stack
+///   pressure.  The final copy to ring buffer memory is done field-by-field.
+#[inline(always)]
+fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
+    use aya_ebpf::helpers::bpf_probe_read_user_str_bytes;
+
+    // Only for execve (59) and execveat (322).
+    let argv_ptr: u64 = match enter.syscall_nr {
+        59 => enter.args[1],   // execve:    args[1] = char *const argv[]
+        322 => enter.args[2],  // execveat:  args[2] = char *const argv[]
+        _ => return 0,
+    };
+
+    if argv_ptr == 0 {
+        return 0;
+    }
+
+    let scratch: *mut [u8; ARGV_EXTRA_MAX] = match ARGV_BUF.get_ptr_mut(0) {
+        Some(p) => p,
+        None => return 0,
+    };
+
+    let dst = unsafe { core::ptr::addr_of_mut!((*ev).argv_extra) as *mut u8 };
+    let mut total: usize = 0;
+
+    // Manually unrolled: capture argv[1], argv[2], argv[3].
+    // Using a macro to avoid repeating the pattern three times.
+    macro_rules! read_arg {
+        ($idx:expr) => {{
+            // Read the pointer at argv[$idx] (8 bytes on 64-bit).
+            let ptr_addr = argv_ptr + ($idx as u64) * 8;
+            let mut arg_ptr: u64 = 0;
+            let ptr_bytes = unsafe {
+                core::slice::from_raw_parts_mut(
+                    &mut arg_ptr as *mut u64 as *mut u8,
+                    core::mem::size_of::<u64>(),
+                )
+            };
+            if unsafe { bpf_probe_read_user_buf(ptr_addr as *const u8, ptr_bytes) }.is_err() {
+                return total as u16;
+            }
+            if arg_ptr == 0 {
+                return total as u16; // end of argv[]
+            }
+
+            // How many bytes remain in the argv_extra buffer.
+            let remaining = ARGV_EXTRA_MAX.saturating_sub(total);
+            if remaining == 0 {
+                return total as u16;
+            }
+
+            // Read the argument string into the per-CPU scratch buffer.
+            let scratch_slice = unsafe {
+                core::slice::from_raw_parts_mut(scratch as *mut u8, ARGV_EXTRA_MAX)
+            };
+            let written = match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, scratch_slice) } {
+                Ok(s) => s.len(),
+                Err(_) => return total as u16,
+            };
+            if written == 0 {
+                return total as u16;
+            }
+
+            // Copy at most `remaining - 1` bytes (leave room for null separator).
+            let copy_len = written.min(remaining.saturating_sub(1));
+            if copy_len == 0 {
+                return total as u16;
+            }
+
+            // Copy string bytes + null separator into argv_extra.
+            unsafe {
+                core::ptr::copy_nonoverlapping(scratch as *const u8, dst.add(total), copy_len);
+                // bpf_probe_read_user_str already null-terminates the scratch;
+                // we also write a null at dst[total + copy_len] as separator.
+                dst.add(total + copy_len).write(0u8);
+            }
+            total += copy_len + 1; // +1 for the null separator
+        }};
+    }
+
+    read_arg!(1);
+    read_arg!(2);
+    read_arg!(3);
+
+    total as u16
 }

@@ -137,7 +137,9 @@ mod tests {
             path_len: 0,
             sockaddr: [0; 28],
             sockaddr_len: 0,
-            _pad: [0; 5],
+            argv_extra: [0; snoop_common::ARGV_EXTRA_MAX],
+            argv_extra_len: 0,
+            _pad: [0; 3],
         }
     }
 

@@ -1,5 +1,7 @@
 //! High-level tracer that orchestrates loading, consuming, and outputting.
 
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 use std::process::Stdio;
 
@@ -37,6 +39,7 @@ pub async fn spawn(
     filter: Filter,
     mode: OutputMode,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
     ebpf_obj: Option<PathBuf>,
     uprobes: UprobeConfig,
 ) -> Result<()> {
@@ -98,7 +101,7 @@ pub async fn spawn(
 
     tokio::select! {
         res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
-        res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, Some(pid)) => res?,
+        res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, output_file, Some(pid)) => res?,
         status = child.wait() => {
             let _ = done_tx.send(true);
             let code = status?.code().unwrap_or(-1);
@@ -116,6 +119,7 @@ pub async fn attach(
     filter: Filter,
     mode: OutputMode,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
     ebpf_obj: Option<PathBuf>,
     uprobes: UprobeConfig,
 ) -> Result<()> {
@@ -135,7 +139,7 @@ pub async fn attach(
 
     tokio::select! {
         res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
-        res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, Some(pid)) => res?,
+        res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, output_file, Some(pid)) => res?,
         _ = watch_pid(pid, done_tx.clone()) => {}
     }
 
@@ -257,14 +261,15 @@ async fn run_output(
     filter: Filter,
     mode: OutputMode,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
     target_pid: Option<u32>,
 ) -> Result<()> {
     match mode {
-        OutputMode::Raw => run_raw(rx, lib_rx, done, filter, flamegraph).await,
-        OutputMode::Json => run_json(rx, lib_rx, done, filter, flamegraph).await,
-        OutputMode::Explain => run_explain(rx, lib_rx, done, filter, flamegraph).await,
+        OutputMode::Raw => run_raw(rx, lib_rx, done, filter, flamegraph, output_file).await,
+        OutputMode::Json => run_json(rx, lib_rx, done, filter, flamegraph, output_file).await,
+        OutputMode::Explain => run_explain(rx, lib_rx, done, filter, flamegraph, output_file).await,
         OutputMode::Count => run_count(rx, done, filter, flamegraph).await,
-        OutputMode::Tui => run_tui(rx, lib_rx, done, filter, flamegraph, target_pid).await,
+        OutputMode::Tui => run_tui(rx, lib_rx, done, filter, flamegraph, output_file, target_pid).await,
     }
 }
 
@@ -290,15 +295,20 @@ async fn run_raw(
     mut done: watch::Receiver<bool>,
     filter: Filter,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
 ) -> Result<()> {
     let out = RawOutput::new(filter);
     let mut fg = flamegraph.as_ref().map(|_| FlamegraphCollector::new());
+    let mut tee = open_tee_file(output_file.as_deref())?;
 
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
                 if let Some(ref mut c) = fg { c.record(&event); }
                 out.handle(&event).context("write error")?;
+                if let Some(ref mut w) = tee {
+                    out.handle_to(w, &event).context("output-file write error")?;
+                }
             }
             Some(lib_event) = opt_recv(&mut lib_rx) => {
                 lib_call::write_raw(&lib_event).context("write error")?;
@@ -308,6 +318,9 @@ async fn run_raw(
                     while let Ok(ev) = rx.try_recv() {
                         if let Some(ref mut c) = fg { c.record(&ev); }
                         out.handle(&ev).context("write error")?;
+                        if let Some(ref mut w) = tee {
+                            out.handle_to(w, &ev).context("output-file write error")?;
+                        }
                     }
                     if let Some(ref mut lrx) = lib_rx {
                         while let Ok(ev) = lrx.try_recv() {
@@ -334,15 +347,20 @@ async fn run_json(
     mut done: watch::Receiver<bool>,
     filter: Filter,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
 ) -> Result<()> {
     let out = JsonOutput::new(filter);
     let mut fg = flamegraph.as_ref().map(|_| FlamegraphCollector::new());
+    let mut tee = open_tee_file(output_file.as_deref())?;
 
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
                 if let Some(ref mut c) = fg { c.record(&event); }
                 out.handle(&event).context("write error")?;
+                if let Some(ref mut w) = tee {
+                    out.handle_to(w, &event).context("output-file write error")?;
+                }
             }
             Some(lib_event) = opt_recv(&mut lib_rx) => {
                 lib_call::write_json(&lib_event).context("write error")?;
@@ -352,6 +370,9 @@ async fn run_json(
                     while let Ok(ev) = rx.try_recv() {
                         if let Some(ref mut c) = fg { c.record(&ev); }
                         out.handle(&ev).context("write error")?;
+                        if let Some(ref mut w) = tee {
+                            out.handle_to(w, &ev).context("output-file write error")?;
+                        }
                     }
                     if let Some(ref mut lrx) = lib_rx {
                         while let Ok(ev) = lrx.try_recv() {
@@ -378,9 +399,13 @@ async fn run_explain(
     mut done: watch::Receiver<bool>,
     filter: Filter,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
 ) -> Result<()> {
     let mut out = ExplainOutput::new(filter);
     let mut fg = flamegraph.as_ref().map(|_| FlamegraphCollector::new());
+    // explain output is flushed as grouped activities; tee is written on flush.
+    let tee = open_tee_file(output_file.as_deref())?;
+    out.set_tee(tee);
 
     loop {
         tokio::select! {
@@ -462,11 +487,13 @@ async fn run_tui(
     done: watch::Receiver<bool>,
     filter: Filter,
     flamegraph: Option<PathBuf>,
+    output_file: Option<PathBuf>,
     target_pid: Option<u32>,
 ) -> Result<()> {
     let collect = flamegraph.is_some();
+    let tee = open_tee_file(output_file.as_deref())?;
     let app = TuiApp::with_flamegraph(filter, target_pid, collect);
-    let fg = app.run(rx, lib_rx, done).await?;
+    let fg = app.run(rx, lib_rx, done, tee).await?;
     if let (Some(collector), Some(path)) = (fg, flamegraph) {
         collector.write_svg(&path)?;
     }
@@ -488,6 +515,20 @@ async fn watch_pid(pid: u32, done: watch::Sender<bool>) {
 
 fn process_exists(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Open (or create/truncate) the optional tee output file.
+///
+/// Returns `Ok(None)` when `path` is `None`.
+fn open_tee_file(path: Option<&std::path::Path>) -> Result<Option<BufWriter<File>>> {
+    match path {
+        None => Ok(None),
+        Some(p) => {
+            let file = File::create(p)
+                .with_context(|| format!("cannot create output file: {}", p.display()))?;
+            Ok(Some(BufWriter::new(file)))
+        }
+    }
 }
 
 /// Block until `pid` stops (WIFSTOPPED).

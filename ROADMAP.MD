@@ -74,6 +74,6 @@
 - [x] Fix spawn-mode race: hold child with `ptrace(PTRACE_TRACEME)` until eBPF loads
 - [x] Increase `PATH_MAX_LEN` 128 → 256 bytes (covers deep/long paths)
 - [x] `--count` mode: per-syscall summary table on exit (like `strace -c`)
-- [ ] Argument string truncation still occurs at 256 bytes for truly long paths
-- [ ] execve argv / sendmsg iov: only first argument string is captured
-- [ ] `--output-file`: tee raw/JSON output to a file while the TUI runs
+- [x] Argument string truncation: `PATH_MAX_LEN` raised to 512; truncated paths show `…` suffix
+- [x] execve argv: capture up to 3 extra argv strings in eBPF (`argv[1..3]`); sendmsg iov still shows only first arg (iovec capture deferred)
+- [x] `--output-file`: tee raw lines to a file while the TUI runs (or alongside raw/json/explain modes)

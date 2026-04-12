@@ -2,18 +2,24 @@
 
 /// Maximum bytes captured for a path or command-name string argument.
 ///
-/// 256 bytes covers nearly all real-world paths (Linux PATH_MAX is 4096, but
-/// executable and config paths are almost always under 200 chars).  The field
-/// lives in ring-buffer memory, not on the BPF stack, so size is not a
-/// verifier concern.  Total SyscallEvent ≈ 408 bytes, well under the ring
-/// buffer's 4 MiB capacity.
-pub const PATH_MAX_LEN: usize = 256;
+/// 512 bytes covers the vast majority of real-world paths (Linux PATH_MAX is
+/// 4096, but executable and config paths are almost always under 400 chars).
+/// The field lives in ring-buffer memory, not on the BPF stack, so size is
+/// not a verifier concern.  Total SyscallEvent ≈ 660 bytes, well under the
+/// ring buffer's 4 MiB capacity.
+pub const PATH_MAX_LEN: usize = 512;
 
 /// Raw bytes of a `struct sockaddr` — enough for IPv4, IPv6, and UNIX.
 /// IPv4 sockaddr_in  = 16 bytes
 /// IPv6 sockaddr_in6 = 28 bytes
 /// UNIX sockaddr_un  = up to 110 bytes (108-byte path + 2 header bytes)
 pub const SOCKADDR_MAX_LEN: usize = 28;
+
+/// Maximum bytes captured for extra argv strings (argv[1..]).
+///
+/// Stored as null-separated C-strings.  Enough for a few typical argument
+/// strings; truncated gracefully when exhausted.
+pub const ARGV_EXTRA_MAX: usize = 256;
 
 /// Data recorded at syscall entry and stored in the per-tid scratch map
 /// inside the eBPF program.  Not sent to userspace directly.
@@ -84,8 +90,15 @@ pub struct SyscallEvent {
     pub sockaddr: [u8; SOCKADDR_MAX_LEN],
     /// Number of valid bytes in `sockaddr`.  0 means no address was captured.
     pub sockaddr_len: u8,
+    /// Captured extra argv strings for execve/execveat (argv[1..]).
+    ///
+    /// Contains null-separated C-strings: `"arg1\x00arg2\x00"`.
+    /// Valid bytes are `argv_extra[0..argv_extra_len]`.
+    pub argv_extra: [u8; ARGV_EXTRA_MAX],
+    /// Number of valid bytes in `argv_extra`.  0 means no extra args captured.
+    pub argv_extra_len: u16,
     /// Reserved / alignment padding.
-    pub _pad: [u8; 5],
+    pub _pad: [u8; 3],
 }
 
 impl SyscallEvent {
@@ -107,6 +120,28 @@ impl SyscallEvent {
         let bytes = &self.path[..end];
         let trimmed = bytes.strip_suffix(b"\0").unwrap_or(bytes);
         core::str::from_utf8(trimmed).ok()
+    }
+
+    /// Returns `true` when the captured path was truncated to `PATH_MAX_LEN`
+    /// bytes.  When truncated, `path_str()` returns the prefix only; callers
+    /// should append `…` to indicate the full string is longer.
+    #[inline]
+    pub fn path_truncated(&self) -> bool {
+        self.path_len as usize >= PATH_MAX_LEN
+    }
+
+    /// Returns extra argv strings for execve/execveat.
+    ///
+    /// The returned slice contains the valid bytes of `argv_extra`, which are
+    /// null-separated argument strings.  An empty slice means no extra args
+    /// were captured.
+    #[inline]
+    pub fn argv_extra_bytes(&self) -> &[u8] {
+        let len = (self.argv_extra_len as usize).min(ARGV_EXTRA_MAX);
+        if len == 0 {
+            return &[];
+        }
+        &self.argv_extra[..len]
     }
 
     /// Returns the raw sockaddr bytes, or an empty slice if none were captured.

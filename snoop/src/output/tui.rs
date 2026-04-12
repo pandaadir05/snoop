@@ -17,7 +17,8 @@
 
 use std::{
     collections::HashMap,
-    io,
+    fs::File,
+    io::{self, BufWriter, Write},
     time::{Duration, Instant},
 };
 
@@ -100,6 +101,8 @@ pub struct TuiApp {
     fg_collector: Option<FlamegraphCollector>,
     /// When `Some`, a detail popup is shown for the event at this index.
     detail_idx: Option<usize>,
+    /// Optional tee file for `--output-file`; receives raw lines alongside TUI.
+    tee: Option<BufWriter<File>>,
 }
 
 impl TuiApp {
@@ -137,6 +140,7 @@ impl TuiApp {
                 None
             },
             detail_idx: None,
+            tee: None,
         }
     }
 
@@ -165,6 +169,25 @@ impl TuiApp {
 
         let decoded = DecodedEvent::from_event(event, !self.filter.no_decode);
         *self.counts.entry(decoded.name).or_insert(0) += 1;
+
+        // Tee: write a raw line to --output-file while the TUI renders.
+        if let Some(ref mut w) = self.tee {
+            let elapsed_us = decoded.timestamp_ns / 1000;
+            let secs = elapsed_us / 1_000_000;
+            let micros = elapsed_us % 1_000_000;
+            let dur_ms = decoded.duration_ns as f64 / 1_000_000.0;
+            let line = format!(
+                "[{secs:>6}.{micros:06}] {comm}({pid}/{tid}) {name}({args}) = {ret} <{dur_ms:.3}ms>",
+                comm = decoded.comm,
+                pid = decoded.pid,
+                tid = decoded.tid,
+                name = decoded.name,
+                args = decoded.args_str,
+                ret = decoded.ret_str,
+            );
+            // Best-effort: ignore write errors so TUI is not disrupted.
+            let _ = writeln!(w, "{line}");
+        }
 
         if self.events.len() >= MAX_EVENTS {
             self.events.remove(0);
@@ -222,7 +245,9 @@ impl TuiApp {
         mut rx: mpsc::Receiver<SyscallEvent>,
         mut lib_rx: Option<mpsc::Receiver<LibCallEvent>>,
         mut done: tokio::sync::watch::Receiver<bool>,
+        tee: Option<BufWriter<File>>,
     ) -> anyhow::Result<Option<FlamegraphCollector>> {
+        self.tee = tee;
         // Set up the terminal.
         enable_raw_mode()?;
         let mut stderr = io::stderr();

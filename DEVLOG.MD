@@ -1,5 +1,17 @@
 # DEVLOG
 
+## 2026-04-12 — v0.3 roadmap items: truncation, execve argv, --output-file
+
+**What changed:**
+- Increased `PATH_MAX_LEN` 256 → 512 bytes. Paths up to 512 bytes are now captured without truncation. When a string is still truncated (at the new limit), a `…` suffix appears in the output.
+- Added execve/execveat argv capture in eBPF. `argv[1]`, `argv[2]`, `argv[3]` are read from user memory and stored in a new `argv_extra` field in `SyscallEvent`. The formatter shows `execve("/bin/ls", ["--color", "-la"], 0x...)` instead of just the binary path.
+- Added `--output-file <FILE>` flag. While the TUI runs (or in raw/json/explain modes), all decoded events are teed to the file in raw-line format so the user gets a persistent log alongside the live TUI view.
+
+**Decisions:**
+- `argv_extra` is a new 256-byte field in `SyscallEvent` (null-separated strings); the binary format version bump is deferred until a more comprehensive wire format change is needed.
+- The eBPF argv loop is manually unrolled (3 iterations) to satisfy the verifier without dynamic loop bounds.
+- The tee writer in TUI mode is best-effort (`let _ = writeln!(w, ...)`) so a slow/full filesystem does not disrupt the TUI render loop.
+
 ## 2026-04-09 — Polish pass: correctness fixes and new features
 
 **What changed:**

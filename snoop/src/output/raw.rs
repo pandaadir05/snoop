@@ -5,7 +5,7 @@
 //! [14:23:01.234567] nginx(1234/1234) openat(AT_FDCWD, 0x7fff…, O_RDONLY) = 5 <0.043ms>
 //! ```
 
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 
 use snoop_common::SyscallEvent;
 
@@ -38,6 +38,20 @@ impl RawOutput {
         let stdout = io::stdout();
         let mut out = stdout.lock();
         writeln!(out, "{line}")?;
+        Ok(true)
+    }
+
+    /// Write a single event to an arbitrary writer (used for `--output-file`).
+    ///
+    /// Applies the same filter and formatting as [`handle`].
+    /// Returns `Ok(false)` when filtered out, `Ok(true)` when written.
+    pub fn handle_to<W: Write>(&self, writer: &mut W, event: &SyscallEvent) -> io::Result<bool> {
+        if !self.filter.accepts(event) {
+            return Ok(false);
+        }
+        let decoded = DecodedEvent::from_event(event, !self.filter.no_decode);
+        let line = self.format_line(&decoded);
+        writeln!(writer, "{line}")?;
         Ok(true)
     }
 
@@ -107,7 +121,9 @@ mod tests {
             path_len: 0,
             sockaddr: [0; 28],
             sockaddr_len: 0,
-            _pad: [0; 5],
+            argv_extra: [0; snoop_common::ARGV_EXTRA_MAX],
+            argv_extra_len: 0,
+            _pad: [0; 3],
         };
         let decoded = DecodedEvent::from_event(&event, true);
         let line = out.format_line(&decoded);

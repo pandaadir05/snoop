@@ -15,6 +15,7 @@ use snoop_common::SyscallNr;
 /// return value, an optional captured path string, and optional sockaddr bytes.
 ///
 /// `path` is `Some(&str)` when the eBPF program captured the first string arg.
+/// `path_truncated` is `true` when the string was cut off at `PATH_MAX_LEN`.
 /// `sockaddr` is the raw bytes of the `struct sockaddr` argument when captured.
 /// Both fall back to showing the raw pointer address when not available.
 pub fn decode_args(
@@ -22,19 +23,22 @@ pub fn decode_args(
     args: &[u64; 6],
     ret: i64,
     path: Option<&str>,
+    path_truncated: bool,
     sockaddr: &[u8],
+    argv_extra: &[u8],
 ) -> String {
+    let t = path_truncated;
     match nr {
         SyscallNr::READ | SyscallNr::WRITE => fmt_read_write(args),
-        SyscallNr::OPEN => fmt_open(args, path),
-        SyscallNr::OPENAT => fmt_openat(args, path),
+        SyscallNr::OPEN => fmt_open(args, path, t),
+        SyscallNr::OPENAT => fmt_openat(args, path, t),
         SyscallNr::CLOSE => fmt_close(args),
         SyscallNr::PREAD64 | SyscallNr::PWRITE64 => fmt_pread_pwrite(args),
         SyscallNr::LSEEK => fmt_lseek(args),
-        SyscallNr::STAT | SyscallNr::LSTAT => fmt_stat(args, path),
+        SyscallNr::STAT | SyscallNr::LSTAT => fmt_stat(args, path, t),
         SyscallNr::FSTAT => fmt_fstat(args),
-        SyscallNr::FSTATAT => fmt_fstatat(args, path),
-        SyscallNr::STATX => fmt_statx(args, path),
+        SyscallNr::FSTATAT => fmt_fstatat(args, path, t),
+        SyscallNr::STATX => fmt_statx(args, path, t),
         SyscallNr::MMAP => fmt_mmap(args),
         SyscallNr::MPROTECT => fmt_mprotect(args),
         SyscallNr::MUNMAP => fmt_munmap(args),
@@ -53,8 +57,8 @@ pub fn decode_args(
         SyscallNr::FORK | SyscallNr::VFORK => String::new(),
         SyscallNr::CLONE => fmt_clone(args),
         SyscallNr::CLONE3 => fmt_clone3(args),
-        SyscallNr::EXECVE => fmt_execve(args, path),
-        SyscallNr::EXECVEAT => fmt_execveat(args, path),
+        SyscallNr::EXECVE => fmt_execve(args, path, t, argv_extra),
+        SyscallNr::EXECVEAT => fmt_execveat(args, path, t, argv_extra),
         SyscallNr::EXIT | SyscallNr::EXIT_GROUP => fmt_exit(args),
         SyscallNr::WAIT4 => fmt_wait4(args),
         SyscallNr::WAITID => fmt_waitid(args),
@@ -65,15 +69,15 @@ pub fn decode_args(
         SyscallNr::PIPE | SyscallNr::PIPE2 => fmt_pipe(args),
         SyscallNr::FUTEX => fmt_futex(args),
         SyscallNr::GETCWD => fmt_getcwd(args),
-        SyscallNr::CHDIR => fmt_chdir(args, path),
+        SyscallNr::CHDIR => fmt_chdir(args, path, t),
         SyscallNr::FCHDIR => fd(args[0]),
-        SyscallNr::MKDIR | SyscallNr::MKDIRAT => fmt_mkdir(args, path),
-        SyscallNr::UNLINK | SyscallNr::UNLINKAT => fmt_unlink(args, path),
-        SyscallNr::RENAME | SyscallNr::RENAMEAT => fmt_rename(args, path),
+        SyscallNr::MKDIR | SyscallNr::MKDIRAT => fmt_mkdir(args, path, t),
+        SyscallNr::UNLINK | SyscallNr::UNLINKAT => fmt_unlink(args, path, t),
+        SyscallNr::RENAME | SyscallNr::RENAMEAT => fmt_rename(args, path, t),
         SyscallNr::IOCTL => fmt_ioctl(args),
         SyscallNr::FALLOCATE => fmt_fallocate(args),
         SyscallNr::FTRUNCATE => fmt_ftruncate(args),
-        SyscallNr::TRUNCATE => fmt_truncate(args, path),
+        SyscallNr::TRUNCATE => fmt_truncate(args, path, t),
         SyscallNr::FSYNC | SyscallNr::FDATASYNC => fd(args[0]),
         SyscallNr::MADVISE => fmt_madvise(args),
         SyscallNr::SENDFILE => fmt_sendfile(args),
@@ -113,9 +117,10 @@ fn ptr(addr: u64) -> String {
 }
 
 /// Format a pointer argument: show the captured string if available, fall
-/// back to the hex address otherwise.
-fn path_or_ptr(addr: u64, path: Option<&str>) -> String {
+/// back to the hex address otherwise.  Appends `…` when truncated.
+fn path_or_ptr(addr: u64, path: Option<&str>, truncated: bool) -> String {
     match path {
+        Some(s) if truncated => format!("\"{}\"…", s.escape_default()),
         Some(s) => format!("\"{}\"", s.escape_default()),
         None => ptr(addr),
     }
@@ -282,15 +287,15 @@ fn fmt_read_write(args: &[u64; 6]) -> String {
     format!("{}, {}, {}", fd(args[0]), ptr(args[1]), args[2])
 }
 
-fn fmt_open(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {}", path_or_ptr(args[0], path), open_flags(args[1]))
+fn fmt_open(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
+    format!("{}, {}", path_or_ptr(args[0], path, t), open_flags(args[1]))
 }
 
-fn fmt_openat(args: &[u64; 6], path: Option<&str>) -> String {
+fn fmt_openat(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
     format!(
         "{}, {}, {}",
         at_fd(args[0]),
-        path_or_ptr(args[1], path),
+        path_or_ptr(args[1], path, t),
         open_flags(args[2])
     )
 }
@@ -319,28 +324,28 @@ fn fmt_lseek(args: &[u64; 6]) -> String {
     format!("{}, {}, {whence}", fd(args[0]), args[1] as i64)
 }
 
-fn fmt_stat(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {}", path_or_ptr(args[0], path), ptr(args[1]))
+fn fmt_stat(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
+    format!("{}, {}", path_or_ptr(args[0], path, t), ptr(args[1]))
 }
 
 fn fmt_fstat(args: &[u64; 6]) -> String {
     format!("{}, {}", fd(args[0]), ptr(args[1]))
 }
 
-fn fmt_fstatat(args: &[u64; 6], path: Option<&str>) -> String {
+fn fmt_fstatat(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
     format!(
         "{}, {}, {}",
         at_fd(args[0]),
-        path_or_ptr(args[1], path),
+        path_or_ptr(args[1], path, t),
         ptr(args[2])
     )
 }
 
-fn fmt_statx(args: &[u64; 6], path: Option<&str>) -> String {
+fn fmt_statx(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
     format!(
         "{}, {}, {:#x}, {:#x}, {}",
         at_fd(args[0]),
-        path_or_ptr(args[1], path),
+        path_or_ptr(args[1], path, t),
         args[2],
         args[3],
         ptr(args[4]),
@@ -547,24 +552,45 @@ fn fmt_clone3(args: &[u64; 6]) -> String {
     format!("{}, {}", ptr(args[0]), args[1])
 }
 
-fn fmt_execve(args: &[u64; 6], path: Option<&str>) -> String {
+fn fmt_execve(args: &[u64; 6], path: Option<&str>, t: bool, argv_extra: &[u8]) -> String {
+    let argv_str = format_argv(argv_extra);
     format!(
-        "{}, {}, {}",
-        path_or_ptr(args[0], path),
-        ptr(args[1]),
+        "{}, [{}], {}",
+        path_or_ptr(args[0], path, t),
+        argv_str,
         ptr(args[2])
     )
 }
 
-fn fmt_execveat(args: &[u64; 6], path: Option<&str>) -> String {
+fn fmt_execveat(args: &[u64; 6], path: Option<&str>, t: bool, argv_extra: &[u8]) -> String {
+    let argv_str = format_argv(argv_extra);
     format!(
-        "{}, {}, {}, {}, {:#x}",
+        "{}, {}, [{}], {}, {:#x}",
         at_fd(args[0]),
-        path_or_ptr(args[1], path),
-        ptr(args[2]),
+        path_or_ptr(args[1], path, t),
+        argv_str,
         ptr(args[3]),
         args[4],
     )
+}
+
+/// Format null-separated argv_extra bytes into a comma-separated list of
+/// quoted strings: `"arg1", "arg2"`.  Returns an empty string when no extra
+/// args were captured.
+fn format_argv(argv_extra: &[u8]) -> String {
+    if argv_extra.is_empty() {
+        return String::new();
+    }
+    let mut parts: Vec<String> = Vec::new();
+    for chunk in argv_extra.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        if let Ok(s) = core::str::from_utf8(chunk) {
+            parts.push(format!("\"{}\"", s.escape_default()));
+        }
+    }
+    parts.join(", ")
 }
 
 fn fmt_exit(args: &[u64; 6]) -> String {
@@ -630,21 +656,21 @@ fn fmt_getcwd(args: &[u64; 6]) -> String {
     format!("{}, {}", ptr(args[0]), args[1])
 }
 
-fn fmt_chdir(args: &[u64; 6], path: Option<&str>) -> String {
-    path_or_ptr(args[0], path)
+fn fmt_chdir(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
+    path_or_ptr(args[0], path, t)
 }
 
-fn fmt_mkdir(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {:#o}", path_or_ptr(args[0], path), args[1])
+fn fmt_mkdir(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
+    format!("{}, {:#o}", path_or_ptr(args[0], path, t), args[1])
 }
 
-fn fmt_unlink(args: &[u64; 6], path: Option<&str>) -> String {
-    path_or_ptr(args[0], path)
+fn fmt_unlink(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
+    path_or_ptr(args[0], path, t)
 }
 
-fn fmt_rename(args: &[u64; 6], path: Option<&str>) -> String {
+fn fmt_rename(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
     // path captures the first argument; the second is always a hex pointer
-    format!("{}, {}", path_or_ptr(args[0], path), ptr(args[1]))
+    format!("{}, {}", path_or_ptr(args[0], path, t), ptr(args[1]))
 }
 
 fn fmt_ioctl(args: &[u64; 6]) -> String {
@@ -741,8 +767,8 @@ fn fmt_ftruncate(args: &[u64; 6]) -> String {
     format!("{}, {}", fd(args[0]), args[1] as i64)
 }
 
-fn fmt_truncate(args: &[u64; 6], path: Option<&str>) -> String {
-    format!("{}, {}", path_or_ptr(args[0], path), args[1] as i64)
+fn fmt_truncate(args: &[u64; 6], path: Option<&str>, t: bool) -> String {
+    format!("{}, {}", path_or_ptr(args[0], path, t), args[1] as i64)
 }
 
 fn fmt_madvise(args: &[u64; 6]) -> String {

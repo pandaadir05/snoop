@@ -10,7 +10,7 @@
 //! The output is [JSON Lines](https://jsonlines.org/) — one object per line,
 //! no trailing comma, no surrounding array.  Pipe to `jq` for filtering.
 
-use std::io::{self, Write};
+use std::io::{self, Write}; // BufWriter used via Write trait in handle_to
 
 use snoop_common::SyscallEvent;
 
@@ -43,6 +43,19 @@ impl JsonOutput {
         let stdout = io::stdout();
         let mut out = stdout.lock();
         writeln!(out, "{line}")?;
+        Ok(true)
+    }
+
+    /// Write a single event to an arbitrary writer (used for `--output-file`).
+    ///
+    /// Returns `Ok(false)` when filtered out, `Ok(true)` when written.
+    pub fn handle_to<W: Write>(&self, writer: &mut W, event: &SyscallEvent) -> io::Result<bool> {
+        if !self.filter.accepts(event) {
+            return Ok(false);
+        }
+        let decoded = DecodedEvent::from_event(event, !self.filter.no_decode);
+        let line = Self::format(&decoded, event);
+        writeln!(writer, "{line}")?;
         Ok(true)
     }
 

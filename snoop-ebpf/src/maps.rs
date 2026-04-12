@@ -8,7 +8,8 @@ use aya_ebpf::{
     maps::{Array, HashMap, PerCpuArray, RingBuf},
 };
 use snoop_common::{
-    LibCallEvent, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN, TLS_DATA_MAX,
+    ARGV_EXTRA_MAX, LibCallEvent, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN,
+    TLS_DATA_MAX,
 };
 
 /// Ring buffer used to forward completed `SyscallEvent`s to userspace.
@@ -52,6 +53,12 @@ pub(crate) static PATH_BUF: PerCpuArray<[u8; PATH_MAX_LEN]> = PerCpuArray::with_
 /// Sized to SOCKADDR_MAX_LEN (28 bytes — enough for IPv6 sockaddr_in6).
 #[map]
 pub(crate) static SOCKADDR_BUF: PerCpuArray<[u8; SOCKADDR_MAX_LEN]> =
+    PerCpuArray::with_max_entries(1, 0);
+
+/// Per-CPU scratch buffer for capturing extra argv strings (argv[1..]).
+/// Used by the execve / execveat path in sys_exit.
+#[map]
+pub(crate) static ARGV_BUF: PerCpuArray<[u8; ARGV_EXTRA_MAX]> =
     PerCpuArray::with_max_entries(1, 0);
 
 // ── uprobe / library-call maps ────────────────────────────────────────────────
@@ -102,9 +109,12 @@ pub(crate) struct LtraceEnterData {
     pub comm: [u8; 16],
 }
 
-// Compile-time size guard: SyscallEvent must fit in the ring buffer in one shot.
+// Compile-time size guard: SyscallEvent must fit in a single ring-buffer
+// reservation.  Ring buffer entries are not limited by the 512-byte BPF
+// stack; the practical ceiling is the ring buffer's total size (4 MiB).
+// We guard against runaway growth with a generous 4 KiB upper bound.
 const _: () = {
-    assert!(core::mem::size_of::<SyscallEvent>() < 512);
+    assert!(core::mem::size_of::<SyscallEvent>() < 4096);
 };
 
 // LibCallEvent must also fit (364 bytes — well under 512).

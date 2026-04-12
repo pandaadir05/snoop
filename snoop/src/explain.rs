@@ -584,7 +584,9 @@ mod tests {
             path_len: len as u16,
             sockaddr: [0; snoop_common::SOCKADDR_MAX_LEN],
             sockaddr_len: 0,
-            _pad: [0; 5],
+            argv_extra: [0; snoop_common::ARGV_EXTRA_MAX],
+            argv_extra_len: 0,
+            _pad: [0; 3],
         }
     }
 

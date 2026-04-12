@@ -7,7 +7,8 @@
 //! [  12.350000]  nginx(1234)  EXEC   /usr/sbin/nginx
 //! ```
 
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 
 use crate::{
     explain::{Activity, ActivityKind},
@@ -21,6 +22,8 @@ use crate::explain::Explainer;
 pub struct ExplainOutput {
     filter: Filter,
     explainer: Explainer,
+    /// Optional tee writer for `--output-file`.
+    tee: Option<BufWriter<File>>,
 }
 
 impl ExplainOutput {
@@ -29,7 +32,13 @@ impl ExplainOutput {
         Self {
             filter,
             explainer: Explainer::new(),
+            tee: None,
         }
+    }
+
+    /// Attach a tee writer so activities are also written to `--output-file`.
+    pub fn set_tee(&mut self, tee: Option<BufWriter<File>>) {
+        self.tee = tee;
     }
 
     /// Feed a raw event.  Returns `true` if an activity was printed.
@@ -41,8 +50,12 @@ impl ExplainOutput {
         let wrote = !activities.is_empty();
         let stdout = io::stdout();
         let mut out = stdout.lock();
-        for act in activities {
-            writeln!(out, "{}", format_activity(&act))?;
+        for act in &activities {
+            let line = format_activity(act);
+            writeln!(out, "{line}")?;
+            if let Some(ref mut w) = self.tee {
+                writeln!(w, "{line}")?;
+            }
         }
         Ok(wrote)
     }
@@ -55,8 +68,12 @@ impl ExplainOutput {
         }
         let stdout = io::stdout();
         let mut out = stdout.lock();
-        for act in activities {
-            writeln!(out, "{}", format_activity(&act))?;
+        for act in &activities {
+            let line = format_activity(act);
+            writeln!(out, "{line}")?;
+            if let Some(ref mut w) = self.tee {
+                writeln!(w, "{line}")?;
+            }
         }
         Ok(())
     }

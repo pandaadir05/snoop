@@ -178,7 +178,7 @@ impl CountOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use snoop_common::{SyscallNr, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
+    use snoop_common::{ARGV_EXTRA_MAX, SyscallNr, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
 
     fn make_filter() -> Filter {
         Filter {
@@ -206,7 +206,9 @@ mod tests {
             path_len: 0,
             sockaddr: [0; SOCKADDR_MAX_LEN],
             sockaddr_len: 0,
-            _pad: [0; 5],
+            argv_extra: [0; ARGV_EXTRA_MAX],
+            argv_extra_len: 0,
+            _pad: [0; 3],
         }
     }
 
