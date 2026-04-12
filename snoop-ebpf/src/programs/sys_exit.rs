@@ -21,9 +21,7 @@ use snoop_common::{
     SyscallEnterData, SyscallEvent, ARGV_EXTRA_MAX, PATH_MAX_LEN, SOCKADDR_MAX_LEN,
 };
 
-use crate::maps::{
-    ARGV_BUF, EVENTS, EXTRA_PIDS, FOLLOW_MODE, PATH_BUF, SOCKADDR_BUF, SYSCALL_ENTER,
-};
+use crate::maps::{EVENTS, EXTRA_PIDS, FOLLOW_MODE, SYSCALL_ENTER};
 
 /// Tracepoint attached to `raw_syscalls/sys_exit`.
 ///
@@ -146,11 +144,14 @@ fn maybe_follow_child(syscall_nr: i64, ret: i64) {
 }
 
 /// Determine the path argument for this syscall and read it from user memory
-/// into the ring buffer entry's `path` field via the per-CPU scratch buffer.
+/// directly into the ring buffer entry's `path` field.
 ///
-/// Returns the number of bytes written (including the null terminator that
-/// `bpf_probe_read_user_str` appends), or 0 if no path applies or the read
-/// fails.
+/// Reads straight from userspace into ring buffer memory via
+/// `bpf_probe_read_user_str_bytes` — no per-CPU scratch buffer or copy loop.
+/// This eliminates the O(PATH_MAX_LEN²) verifier state explosion that occurred
+/// when a scratch buffer was copied to a dynamic ring-buffer offset.
+///
+/// Returns the number of bytes written (including the null terminator), or 0.
 #[inline(always)]
 fn capture_path_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
     let path_ptr: *const u8 = match enter.syscall_nr {
@@ -167,31 +168,18 @@ fn capture_path_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
         return 0;
     }
 
-    let scratch: *mut [u8; PATH_MAX_LEN] = match PATH_BUF.get_ptr_mut(0) {
-        Some(p) => p,
-        None => return 0,
+    // Read directly from user memory into the ring buffer's `path` field.
+    // The destination is a fixed-offset slice (no dynamic accumulation),
+    // so the verifier can verify bounds in O(1).
+    let dest = unsafe {
+        let path_field = core::ptr::addr_of_mut!((*ev).path) as *mut u8;
+        core::slice::from_raw_parts_mut(path_field, PATH_MAX_LEN)
     };
 
-    let dest: &mut [u8] =
-        unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, PATH_MAX_LEN) };
-
-    let written = match unsafe { bpf_probe_read_user_str_bytes(path_ptr, dest) } {
-        Ok(s) => s.len(),
-        Err(_) => return 0,
-    };
-
-    if written == 0 {
-        return 0;
+    match unsafe { bpf_probe_read_user_str_bytes(path_ptr, dest) } {
+        Ok(s) => s.len() as u16,
+        Err(_) => 0,
     }
-
-    let copy_len = written.min(PATH_MAX_LEN);
-
-    unsafe {
-        let path_dst = core::ptr::addr_of_mut!((*ev).path) as *mut u8;
-        core::ptr::copy_nonoverlapping(scratch as *const u8, path_dst, copy_len);
-    }
-
-    copy_len as u16
 }
 
 /// Capture the sockaddr argument for socket syscalls by reading the struct
@@ -253,20 +241,14 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent, ret: i6
         return 0;
     }
 
-    let scratch: *mut [u8; SOCKADDR_MAX_LEN] = match SOCKADDR_BUF.get_ptr_mut(0) {
-        Some(p) => p,
-        None => return 0,
+    // Read directly from user memory into the ring buffer's `sockaddr` field.
+    let dest = unsafe {
+        let sa_field = core::ptr::addr_of_mut!((*ev).sockaddr) as *mut u8;
+        core::slice::from_raw_parts_mut(sa_field, read_len)
     };
-
-    let dest: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, read_len) };
 
     if unsafe { bpf_probe_read_user_buf(sa_ptr, dest) }.is_err() {
         return 0;
-    }
-
-    unsafe {
-        let sa_dst = core::ptr::addr_of_mut!((*ev).sockaddr) as *mut u8;
-        core::ptr::copy_nonoverlapping(scratch as *const u8, sa_dst, read_len);
     }
 
     read_len as u8
@@ -281,11 +263,19 @@ fn capture_sockaddr_arg(enter: &SyscallEnterData, ev: *mut SyscallEvent, ret: i6
 /// Returns the total number of bytes written (including all null terminators),
 /// or 0 if the syscall is not execve/execveat or no args could be read.
 ///
-/// BPF verifier notes:
-/// - The loop is manually unrolled to a fixed count (3 args) so the verifier
-///   sees no dynamic loop bounds.
-/// - All buffer accesses use the per-CPU ARGV_BUF scratch to avoid stack
-///   pressure.  The final copy to ring buffer memory is done field-by-field.
+/// # Verifier complexity
+///
+/// The previous implementation used a per-CPU scratch buffer and
+/// `copy_nonoverlapping` to move bytes from scratch to ring buffer at a
+/// *dynamically-accumulated* destination offset (`dst.add(total)`).  The
+/// verifier had to enumerate O(ARGV_EXTRA_MAX²) states for the inner copy loop
+/// because both the destination offset AND the copy length were unknown at
+/// compile time, overflowing the 1 000 000-instruction limit.
+///
+/// The fix: read each argument string directly from userspace into the ring
+/// buffer via `bpf_probe_read_user_str_bytes`.  This is a single BPF helper
+/// call; the verifier analyses it in O(1) regardless of string length,
+/// completely eliminating the copy loop.
 #[inline(always)]
 fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
     use aya_ebpf::helpers::bpf_probe_read_user_str_bytes;
@@ -301,19 +291,13 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
         return 0;
     }
 
-    let scratch: *mut [u8; ARGV_EXTRA_MAX] = match ARGV_BUF.get_ptr_mut(0) {
-        Some(p) => p,
-        None => return 0,
-    };
-
-    let dst = unsafe { core::ptr::addr_of_mut!((*ev).argv_extra) as *mut u8 };
+    let base: *mut u8 = unsafe { core::ptr::addr_of_mut!((*ev).argv_extra) as *mut u8 };
     let mut total: usize = 0;
 
     // Manually unrolled: capture argv[1], argv[2], argv[3].
-    // Using a macro to avoid repeating the pattern three times.
     macro_rules! read_arg {
         ($idx:expr) => {{
-            // Read the pointer at argv[$idx] (8 bytes on 64-bit).
+            // Read the pointer value at argv[$idx] (8 bytes on 64-bit).
             let ptr_addr = argv_ptr + ($idx as u64) * 8;
             let mut arg_ptr: u64 = 0;
             let ptr_bytes = unsafe {
@@ -329,39 +313,27 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
                 return total as u16; // end of argv[]
             }
 
-            // How many bytes remain in the argv_extra buffer.
             let remaining = ARGV_EXTRA_MAX.saturating_sub(total);
             if remaining == 0 {
                 return total as u16;
             }
 
-            // Read the argument string into the per-CPU scratch buffer.
-            let scratch_slice =
-                unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, ARGV_EXTRA_MAX) };
+            // Read the argument string DIRECTLY from userspace into ring buffer
+            // memory at the current write position.  No scratch buffer, no copy
+            // loop — a single BPF helper call the verifier checks in O(1).
+            let dest =
+                unsafe { core::slice::from_raw_parts_mut(base.add(total), remaining) };
             let written =
-                match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, scratch_slice) }
-                {
+                match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, dest) } {
                     Ok(s) => s.len(),
                     Err(_) => return total as u16,
                 };
             if written == 0 {
                 return total as u16;
             }
-
-            // Copy at most `remaining - 1` bytes (leave room for null separator).
-            let copy_len = written.min(remaining.saturating_sub(1));
-            if copy_len == 0 {
-                return total as u16;
-            }
-
-            // Copy string bytes + null separator into argv_extra.
-            unsafe {
-                core::ptr::copy_nonoverlapping(scratch as *const u8, dst.add(total), copy_len);
-                // bpf_probe_read_user_str already null-terminates the scratch;
-                // we also write a null at dst[total + copy_len] as separator.
-                dst.add(total + copy_len).write(0u8);
-            }
-            total += copy_len + 1; // +1 for the null separator
+            // bpf_probe_read_user_str_bytes appends a null terminator that acts
+            // as the field separator for userspace.
+            total += written;
         }};
     }
 

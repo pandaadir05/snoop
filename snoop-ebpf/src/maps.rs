@@ -5,12 +5,9 @@
 
 use aya_ebpf::{
     macros::map,
-    maps::{Array, HashMap, PerCpuArray, RingBuf},
+    maps::{Array, HashMap, RingBuf},
 };
-use snoop_common::{
-    LibCallEvent, SyscallEnterData, SyscallEvent, ARGV_EXTRA_MAX, PATH_MAX_LEN, SOCKADDR_MAX_LEN,
-    TLS_DATA_MAX,
-};
+use snoop_common::{LibCallEvent, SyscallEnterData, SyscallEvent, TLS_DATA_MAX};
 
 /// Ring buffer used to forward completed `SyscallEvent`s to userspace.
 ///
@@ -44,21 +41,11 @@ pub(crate) static FOLLOW_MODE: Array<u8> = Array::with_max_entries(1, 0);
 #[map]
 pub(crate) static EXTRA_PIDS: HashMap<u32, u8> = HashMap::with_max_entries(1024, 0);
 
-/// Per-CPU scratch buffer used to read path strings from user memory without
-/// consuming the 512-byte BPF stack.  One entry of PATH_MAX_LEN bytes per CPU.
-#[map]
-pub(crate) static PATH_BUF: PerCpuArray<[u8; PATH_MAX_LEN]> = PerCpuArray::with_max_entries(1, 0);
-
-/// Per-CPU scratch buffer used to read sockaddr structs from user memory.
-/// Sized to SOCKADDR_MAX_LEN (28 bytes — enough for IPv6 sockaddr_in6).
-#[map]
-pub(crate) static SOCKADDR_BUF: PerCpuArray<[u8; SOCKADDR_MAX_LEN]> =
-    PerCpuArray::with_max_entries(1, 0);
-
-/// Per-CPU scratch buffer for capturing extra argv strings (argv[1..]).
-/// Used by the execve / execveat path in sys_exit.
-#[map]
-pub(crate) static ARGV_BUF: PerCpuArray<[u8; ARGV_EXTRA_MAX]> = PerCpuArray::with_max_entries(1, 0);
+// PATH_BUF, SOCKADDR_BUF, and ARGV_BUF have been removed.  The sys_exit
+// capture functions now read directly from user memory into ring buffer memory
+// via bpf_probe_read_user_str_bytes / bpf_probe_read_user_buf, eliminating
+// the scratch→ringbuf copy loops that caused verifier complexity to exceed
+// the 1 000 000-instruction limit.
 
 // ── uprobe / library-call maps ────────────────────────────────────────────────
 

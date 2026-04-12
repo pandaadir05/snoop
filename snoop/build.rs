@@ -102,6 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .env("CARGO_TARGET_DIR", &ebpf_target_dir)
         // Don't inherit host RUSTFLAGS — they may contain flags invalid for BPF.
         .env_remove("RUSTFLAGS")
+        // Force nightly even when the workspace rust-toolchain.toml pins stable.
+        .env("RUSTUP_TOOLCHAIN", "nightly")
         .current_dir(workspace_root)
         .status()?;
 

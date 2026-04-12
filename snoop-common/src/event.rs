@@ -2,12 +2,11 @@
 
 /// Maximum bytes captured for a path or command-name string argument.
 ///
-/// 512 bytes covers the vast majority of real-world paths (Linux PATH_MAX is
-/// 4096, but executable and config paths are almost always under 400 chars).
-/// The field lives in ring-buffer memory, not on the BPF stack, so size is
-/// not a verifier concern.  Total SyscallEvent ≈ 660 bytes, well under the
-/// ring buffer's 4 MiB capacity.
-pub const PATH_MAX_LEN: usize = 512;
+/// 256 bytes covers the vast majority of real-world paths (executable and
+/// config paths are almost always shorter).  Kept at 256 to limit BPF
+/// verifier complexity: the memset loop the verifier must unroll scales
+/// linearly with this constant, and 5.15 kernels have a tighter state budget.
+pub const PATH_MAX_LEN: usize = 256;
 
 /// Raw bytes of a `struct sockaddr` — enough for IPv4, IPv6, and UNIX.
 /// IPv4 sockaddr_in  = 16 bytes
@@ -17,9 +16,9 @@ pub const SOCKADDR_MAX_LEN: usize = 28;
 
 /// Maximum bytes captured for extra argv strings (argv[1..]).
 ///
-/// Stored as null-separated C-strings.  Enough for a few typical argument
-/// strings; truncated gracefully when exhausted.
-pub const ARGV_EXTRA_MAX: usize = 256;
+/// Stored as null-separated C-strings.  Kept at 128 to limit BPF verifier
+/// complexity on 5.15 kernels; truncated gracefully when exhausted.
+pub const ARGV_EXTRA_MAX: usize = 128;
 
 /// Data recorded at syscall entry and stored in the per-tid scratch map
 /// inside the eBPF program.  Not sent to userspace directly.
