@@ -6,8 +6,9 @@ description = "eBPF programs for snoop (syscall tracepoints)"
 license = "MIT OR Apache-2.0"
 publish = false
 
-[lib]
-path = "src/lib.rs"
+[[bin]]
+name = "snoop-ebpf"
+path = "src/main.rs"
 
 [dependencies]
 snoop-common = { path = "../snoop-common" }
