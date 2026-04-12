@@ -245,7 +245,7 @@ kernel                               userspace
 raw_syscalls/sys_enter  ──►  SYSCALL_ENTER map (per-tid scratch)
 raw_syscalls/sys_exit   ──►  EVENTS ring buffer (4 MiB)
                                   │
-                             AsyncFd reader (tokio)
+                        poll consumer (tokio::spawn)
                                   │
                        ┌──────────┴──────────┐
                    RawOutput             TuiApp
@@ -269,12 +269,14 @@ rustup component add rust-src --toolchain nightly
 # bpf-linker links the eBPF object (no system LLVM needed)
 cargo install bpf-linker --no-default-features
 
-cargo xtask build-ebpf
 cargo build --release
 sudo ./target/release/snoop -p $$
 ```
 
-During development you can build and run in one step:
+The build script compiles the eBPF programs automatically. No separate step
+needed.
+
+During development you can also use xtask:
 
 ```bash
 cargo xtask run -- -p $$
