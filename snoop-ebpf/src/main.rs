@@ -24,6 +24,15 @@ mod maps;
 #[cfg(target_arch = "bpf")]
 mod programs;
 
+// no_std binaries must supply a panic handler.  In BPF programs panics are
+// unreachable at runtime — the verifier rejects loops and the generated code
+// never calls panic infrastructure — so an infinite loop is the correct body.
+#[cfg(target_arch = "bpf")]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
 /// Host-only stub so `cargo build` succeeds outside the BPF toolchain.
 #[cfg(not(target_arch = "bpf"))]
 fn main() {}
