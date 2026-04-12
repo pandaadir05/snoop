@@ -47,12 +47,16 @@ pub async fn spawn(
         bail!("no command specified");
     }
 
+    // In TUI mode the child's output would corrupt the alternate-screen
+    // terminal, so redirect to /dev/null.  Other modes (raw, json, etc.)
+    // let the child's output through like strace does.
     let mut command = tokio::process::Command::new(&cmd[0]);
-    command
-        .args(&cmd[1..])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    command.args(&cmd[1..]).stdin(Stdio::inherit());
+    if mode == OutputMode::Tui {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    } else {
+        command.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    }
 
     // Safety: ptrace(PTRACE_TRACEME, ...) is async-signal-safe and may be
     // called between fork() and exec() without restriction.  On success the
@@ -213,6 +217,11 @@ async fn consume_lib_ring_buf(
 ///
 /// Takes ownership of `ebpf` so the eBPF programs remain loaded for the life
 /// of this function.
+///
+/// Uses a timeout-wrapped `AsyncFd::readable_mut()` with a fallback manual
+/// poll.  This is more robust than pure epoll: on kernels where BPF ring
+/// buffer notifications are unreliable (e.g. WSL2 5.15), the timeout fires
+/// and events are still drained promptly.
 async fn consume_ring_buf(
     mut ebpf: aya::Ebpf,
     tx: mpsc::Sender<SyscallEvent>,
@@ -225,11 +234,20 @@ async fn consume_ring_buf(
     let mut async_fd = AsyncFd::new(ring_buf)?;
 
     loop {
-        tokio::select! {
-            guard = async_fd.readable_mut() => {
-                let mut guard = guard?;
-                let ring_buf = guard.get_inner_mut();
-                while let Some(item) = ring_buf.next() {
+        // Wait for the ring buffer fd to become readable, but cap the wait
+        // at 50 ms so we still drain events even if the kernel never
+        // delivers an epoll notification.
+        let guard_result = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            async_fd.readable_mut(),
+        )
+        .await;
+
+        match guard_result {
+            // Normal path: epoll woke us up.
+            Ok(Ok(mut guard)) => {
+                let rb = guard.get_inner_mut();
+                while let Some(item) = rb.next() {
                     if item.len() < std::mem::size_of::<SyscallEvent>() {
                         log::warn!("short ring-buffer item ({} bytes), skipping", item.len());
                         continue;
@@ -243,11 +261,31 @@ async fn consume_ring_buf(
                 }
                 guard.clear_ready();
             }
-            _ = done.changed() => {
-                if *done.borrow() {
-                    return Ok(());
+            // AsyncFd error — propagate.
+            Ok(Err(e)) => return Err(e.into()),
+            // Timeout: no epoll notification received.  Manually poll the
+            // ring buffer.  After the timeout the readable_mut future has
+            // been dropped, releasing the borrow on async_fd.
+            Err(_) => {
+                let rb = async_fd.get_mut();
+                while let Some(item) = rb.next() {
+                    if item.len() < std::mem::size_of::<SyscallEvent>() {
+                        log::warn!("short ring-buffer item ({} bytes), skipping", item.len());
+                        continue;
+                    }
+                    let event = unsafe {
+                        std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent)
+                    };
+                    if tx.send(event).await.is_err() {
+                        return Ok(());
+                    }
                 }
             }
+        }
+
+        // Non-blocking check for the done signal.
+        if done.has_changed().unwrap_or(false) && *done.borrow() {
+            return Ok(());
         }
     }
 }
