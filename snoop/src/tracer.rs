@@ -103,13 +103,21 @@ pub async fn spawn(
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
+    // Extract the EVENTS ring buffer as an owned handle (like LIB_EVENTS).
+    // This severs the lifetime tie to `ebpf` while the kernel keeps its own
+    // reference to the map so BPF programs continue writing to it.
+    let events_rb = take_events_ring_buf(&mut ebpf)?;
+
+    // `ebpf` must stay alive so the attached programs aren't detached.
+    // Move it into the select so it's dropped only when the trace ends.
     tokio::select! {
-        res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
+        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
         res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, output_file, Some(pid)) => res?,
         status = child.wait() => {
             let _ = done_tx.send(true);
             let code = status?.code().unwrap_or(-1);
             log::info!("child process exited with status {code}");
+            drop(ebpf);
         }
     }
 
@@ -142,10 +150,12 @@ pub async fn attach(
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
+    let events_rb = take_events_ring_buf(&mut ebpf)?;
+
     tokio::select! {
-        res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
+        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
         res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, output_file, Some(pid)) => res?,
-        _ = watch_pid(pid, done_tx.clone()) => {}
+        _ = watch_pid(pid, done_tx.clone()) => { drop(ebpf); }
     }
 
     Ok(())
@@ -211,82 +221,67 @@ async fn consume_lib_ring_buf(
     }
 }
 
+// ── EVENTS ring buffer extraction ─────────────────────────────────────────────
+
+/// Extract `EVENTS` from `ebpf` as an *owned* `RingBuf<MapData>`.
+///
+/// Uses `Ebpf::take_map` (same pattern as LIB_EVENTS) so the ring buffer
+/// has no lifetime tie to the `Ebpf` handle.  The kernel keeps its own
+/// reference to the underlying map, so BPF programs continue pushing events.
+fn take_events_ring_buf(ebpf: &mut aya::Ebpf) -> Result<RingBuf<MapData>> {
+    let map = ebpf
+        .take_map("EVENTS")
+        .context("EVENTS ring buffer not found in eBPF object")?;
+    RingBuf::try_from(map).context("EVENTS is not a ring buffer")
+}
+
 // ── syscall ring buffer consumer ──────────────────────────────────────────────
 
 /// Read events from the `EVENTS` ring buffer and forward them over `tx`.
 ///
-/// Takes ownership of `ebpf` so the eBPF programs remain loaded for the life
-/// of this function.
+/// Polls the ring buffer in a tight loop: drain all pending items, then
+/// `tokio::time::sleep` for a short interval before trying again.  This is
+/// simpler and more reliable than `AsyncFd`-based notifications, which can
+/// be unreliable on certain kernels (e.g. WSL2 5.15) where BPF ring buffer
+/// epoll wakeups are not always delivered.
 ///
-/// Uses a timeout-wrapped `AsyncFd::readable_mut()` with a fallback manual
-/// poll.  This is more robust than pure epoll: on kernels where BPF ring
-/// buffer notifications are unreliable (e.g. WSL2 5.15), the timeout fires
-/// and events are still drained promptly.
+/// 10 ms polling gives ~100 Hz update rate, which is well above the TUI's
+/// 60 Hz refresh.  CPU cost is negligible (one syscall every 10 ms when idle).
 async fn consume_ring_buf(
-    mut ebpf: aya::Ebpf,
+    mut ring_buf: RingBuf<MapData>,
     tx: mpsc::Sender<SyscallEvent>,
     mut done: watch::Receiver<bool>,
 ) -> Result<()> {
-    let ring_buf = RingBuf::try_from(
-        ebpf.map_mut("EVENTS")
-            .context("EVENTS ring buffer not found in eBPF object")?,
-    )?;
-    let mut async_fd = AsyncFd::new(ring_buf)?;
-
     loop {
-        // Wait for the ring buffer fd to become readable, but cap the wait
-        // at 50 ms so we still drain events even if the kernel never
-        // delivers an epoll notification.
-        let guard_result = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            async_fd.readable_mut(),
-        )
-        .await;
-
-        match guard_result {
-            // Normal path: epoll woke us up.
-            Ok(Ok(mut guard)) => {
-                let rb = guard.get_inner_mut();
-                while let Some(item) = rb.next() {
-                    if item.len() < std::mem::size_of::<SyscallEvent>() {
-                        log::warn!("short ring-buffer item ({} bytes), skipping", item.len());
-                        continue;
-                    }
-                    let event = unsafe {
-                        std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent)
-                    };
-                    if tx.send(event).await.is_err() {
-                        return Ok(());
-                    }
-                }
-                guard.clear_ready();
+        // Drain all available events.
+        while let Some(item) = ring_buf.next() {
+            if item.len() < std::mem::size_of::<SyscallEvent>() {
+                log::warn!("short ring-buffer item ({} bytes), skipping", item.len());
+                continue;
             }
-            // AsyncFd error — propagate.
-            Ok(Err(e)) => return Err(e.into()),
-            // Timeout: no epoll notification received.  Manually poll the
-            // ring buffer.  After the timeout the readable_mut future has
-            // been dropped, releasing the borrow on async_fd.
-            Err(_) => {
-                let rb = async_fd.get_mut();
-                while let Some(item) = rb.next() {
-                    if item.len() < std::mem::size_of::<SyscallEvent>() {
-                        log::warn!("short ring-buffer item ({} bytes), skipping", item.len());
-                        continue;
-                    }
-                    let event = unsafe {
-                        std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent)
-                    };
-                    if tx.send(event).await.is_err() {
-                        return Ok(());
-                    }
-                }
+            let event =
+                unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent) };
+            if tx.send(event).await.is_err() {
+                return Ok(()); // receiver dropped — output layer exited
             }
         }
 
-        // Non-blocking check for the done signal.
+        // Check if the tracer has finished.
         if done.has_changed().unwrap_or(false) && *done.borrow() {
+            // Final drain — pick up any stragglers.
+            while let Some(item) = ring_buf.next() {
+                if item.len() >= std::mem::size_of::<SyscallEvent>() {
+                    let event = unsafe {
+                        std::ptr::read_unaligned(item.as_ptr() as *const SyscallEvent)
+                    };
+                    let _ = tx.send(event).await;
+                }
+            }
             return Ok(());
         }
+
+        // Brief sleep to avoid busy-spinning when no events are pending.
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
@@ -644,17 +639,19 @@ pub async fn record_spawn(
         .with_context(|| format!("failed to spawn `{}`", cmd[0]))?;
 
     let pid = child.id().context("child process has already exited")?;
-    let ebpf = loader::load(pid, true, ebpf_obj)?;
+    let mut ebpf = loader::load(pid, true, ebpf_obj)?;
+    let events_rb = take_events_ring_buf(&mut ebpf)?;
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
     tokio::select! {
-        res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
+        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
         res = record_events(rx, done_rx, output_path.clone()) => res?,
         status = child.wait() => {
             let _ = done_tx.send(true);
             let code = status?.code().unwrap_or(-1);
             log::info!("child exited with status {code}");
+            drop(ebpf);
         }
     }
 
@@ -673,14 +670,15 @@ pub async fn record_attach(
         bail!("process {pid} does not exist");
     }
 
-    let ebpf = loader::load(pid, follow, ebpf_obj)?;
+    let mut ebpf = loader::load(pid, follow, ebpf_obj)?;
+    let events_rb = take_events_ring_buf(&mut ebpf)?;
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
     tokio::select! {
-        res = consume_ring_buf(ebpf, tx, done_rx.clone()) => res?,
+        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
         res = record_events(rx, done_rx, output_path.clone()) => res?,
-        _ = watch_pid(pid, done_tx.clone()) => {}
+        _ = watch_pid(pid, done_tx.clone()) => { drop(ebpf); }
     }
 
     log::info!("trace written to {}", output_path.display());
