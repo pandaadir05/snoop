@@ -128,7 +128,7 @@ pub fn find_library(pid: u32, name_pattern: &str) -> Result<PathBuf> {
 fn attach_uprobe(
     ebpf: &mut Ebpf,
     prog_name: &str,
-    lib_path: &PathBuf,
+    lib_path: &std::path::Path,
     fn_name: &str,
 ) -> Result<()> {
     let prog: &mut UProbe = ebpf
@@ -158,7 +158,7 @@ fn attach_uprobe(
 fn attach_uretprobe(
     ebpf: &mut Ebpf,
     prog_name: &str,
-    lib_path: &PathBuf,
+    lib_path: &std::path::Path,
     fn_name: &str,
 ) -> Result<()> {
     let prog: &mut UProbe = ebpf
