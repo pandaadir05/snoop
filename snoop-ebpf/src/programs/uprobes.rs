@@ -20,8 +20,7 @@
 
 use aya_ebpf::{
     helpers::{
-        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_ns,
-        bpf_probe_read_user_buf,
+        bpf_get_current_comm, bpf_get_current_pid_tgid, bpf_ktime_get_ns, bpf_probe_read_user_buf,
     },
     macros::{uprobe, uretprobe},
     programs::{ProbeContext, RetProbeContext},
@@ -165,7 +164,9 @@ fn try_ssl_enter(ctx: &ProbeContext) -> Result<(), i64> {
         comm,
     };
 
-    SSL_ENTER.insert(&pid_tgid, &data, 0).map_err(|e| e as i64)?;
+    SSL_ENTER
+        .insert(&pid_tgid, &data, 0)
+        .map_err(|e| e as i64)?;
     Ok(())
 }
 
