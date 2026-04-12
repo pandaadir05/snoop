@@ -108,10 +108,17 @@ pub async fn spawn(
     // reference to the map so BPF programs continue writing to it.
     let events_rb = take_events_ring_buf(&mut ebpf)?;
 
+    // Spawn the ring buffer consumer as a separate tokio task so it
+    // runs independently of the TUI event loop.  The TUI's
+    // `event::poll()` is a synchronous blocking call that would starve
+    // `consume_ring_buf` if they shared the same task via `select!`.
+    let rb_done_rx = done_rx.clone();
+    let rb_handle = tokio::spawn(consume_ring_buf(events_rb, tx, rb_done_rx));
+
     // `ebpf` must stay alive so the attached programs aren't detached.
     // Move it into the select so it's dropped only when the trace ends.
     tokio::select! {
-        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
+        res = rb_handle => res??,
         res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, output_file, Some(pid)) => res?,
         status = child.wait() => {
             let _ = done_tx.send(true);
@@ -152,8 +159,11 @@ pub async fn attach(
 
     let events_rb = take_events_ring_buf(&mut ebpf)?;
 
+    let rb_done_rx = done_rx.clone();
+    let rb_handle = tokio::spawn(consume_ring_buf(events_rb, tx, rb_done_rx));
+
     tokio::select! {
-        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
+        res = rb_handle => res??,
         res = run_output(rx, lib_rx, done_rx, filter, mode, flamegraph, output_file, Some(pid)) => res?,
         _ = watch_pid(pid, done_tx.clone()) => { drop(ebpf); }
     }
@@ -644,8 +654,11 @@ pub async fn record_spawn(
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
+    let rb_done_rx = done_rx.clone();
+    let rb_handle = tokio::spawn(consume_ring_buf(events_rb, tx, rb_done_rx));
+
     tokio::select! {
-        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
+        res = rb_handle => res??,
         res = record_events(rx, done_rx, output_path.clone()) => res?,
         status = child.wait() => {
             let _ = done_tx.send(true);
@@ -675,8 +688,11 @@ pub async fn record_attach(
     let (tx, rx) = mpsc::channel(4096);
     let (done_tx, done_rx) = watch::channel(false);
 
+    let rb_done_rx = done_rx.clone();
+    let rb_handle = tokio::spawn(consume_ring_buf(events_rb, tx, rb_done_rx));
+
     tokio::select! {
-        res = consume_ring_buf(events_rb, tx, done_rx.clone()) => res?,
+        res = rb_handle => res??,
         res = record_events(rx, done_rx, output_path.clone()) => res?,
         _ = watch_pid(pid, done_tx.clone()) => { drop(ebpf); }
     }
