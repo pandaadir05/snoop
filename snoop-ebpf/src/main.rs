@@ -18,6 +18,7 @@
 // custom panic handler.
 #![cfg_attr(target_arch = "bpf", no_std)]
 #![cfg_attr(target_arch = "bpf", no_main)]
+#![cfg_attr(target_arch = "bpf", feature(asm_experimental_arch))]
 
 #[cfg(target_arch = "bpf")]
 mod maps;
