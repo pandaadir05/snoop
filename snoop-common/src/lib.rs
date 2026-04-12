@@ -10,6 +10,6 @@ mod event;
 mod lib_event;
 mod syscall_nr;
 
-pub use event::{ARGV_EXTRA_MAX, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
+pub use event::{SyscallEnterData, SyscallEvent, ARGV_EXTRA_MAX, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
 pub use lib_event::{LibCallEvent, LibFunc, TLS_DATA_MAX};
 pub use syscall_nr::SyscallNr;

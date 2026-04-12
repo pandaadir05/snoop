@@ -269,7 +269,18 @@ async fn run_output(
         OutputMode::Json => run_json(rx, lib_rx, done, filter, flamegraph, output_file).await,
         OutputMode::Explain => run_explain(rx, lib_rx, done, filter, flamegraph, output_file).await,
         OutputMode::Count => run_count(rx, done, filter, flamegraph).await,
-        OutputMode::Tui => run_tui(rx, lib_rx, done, filter, flamegraph, output_file, target_pid).await,
+        OutputMode::Tui => {
+            run_tui(
+                rx,
+                lib_rx,
+                done,
+                filter,
+                flamegraph,
+                output_file,
+                target_pid,
+            )
+            .await
+        }
     }
 }
 

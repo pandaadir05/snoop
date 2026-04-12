@@ -17,9 +17,13 @@ use aya_ebpf::{
     macros::tracepoint,
     programs::TracePointContext,
 };
-use snoop_common::{ARGV_EXTRA_MAX, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN};
+use snoop_common::{
+    SyscallEnterData, SyscallEvent, ARGV_EXTRA_MAX, PATH_MAX_LEN, SOCKADDR_MAX_LEN,
+};
 
-use crate::maps::{ARGV_BUF, EVENTS, EXTRA_PIDS, FOLLOW_MODE, PATH_BUF, SOCKADDR_BUF, SYSCALL_ENTER};
+use crate::maps::{
+    ARGV_BUF, EVENTS, EXTRA_PIDS, FOLLOW_MODE, PATH_BUF, SOCKADDR_BUF, SYSCALL_ENTER,
+};
 
 /// Tracepoint attached to `raw_syscalls/sys_exit`.
 ///
@@ -288,8 +292,8 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
 
     // Only for execve (59) and execveat (322).
     let argv_ptr: u64 = match enter.syscall_nr {
-        59 => enter.args[1],   // execve:    args[1] = char *const argv[]
-        322 => enter.args[2],  // execveat:  args[2] = char *const argv[]
+        59 => enter.args[1],  // execve:    args[1] = char *const argv[]
+        322 => enter.args[2], // execveat:  args[2] = char *const argv[]
         _ => return 0,
     };
 
@@ -332,13 +336,14 @@ fn capture_argv_extra(enter: &SyscallEnterData, ev: *mut SyscallEvent) -> u16 {
             }
 
             // Read the argument string into the per-CPU scratch buffer.
-            let scratch_slice = unsafe {
-                core::slice::from_raw_parts_mut(scratch as *mut u8, ARGV_EXTRA_MAX)
-            };
-            let written = match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, scratch_slice) } {
-                Ok(s) => s.len(),
-                Err(_) => return total as u16,
-            };
+            let scratch_slice =
+                unsafe { core::slice::from_raw_parts_mut(scratch as *mut u8, ARGV_EXTRA_MAX) };
+            let written =
+                match unsafe { bpf_probe_read_user_str_bytes(arg_ptr as *const u8, scratch_slice) }
+                {
+                    Ok(s) => s.len(),
+                    Err(_) => return total as u16,
+                };
             if written == 0 {
                 return total as u16;
             }

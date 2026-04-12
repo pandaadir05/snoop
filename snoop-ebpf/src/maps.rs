@@ -8,7 +8,7 @@ use aya_ebpf::{
     maps::{Array, HashMap, PerCpuArray, RingBuf},
 };
 use snoop_common::{
-    ARGV_EXTRA_MAX, LibCallEvent, SyscallEnterData, SyscallEvent, PATH_MAX_LEN, SOCKADDR_MAX_LEN,
+    LibCallEvent, SyscallEnterData, SyscallEvent, ARGV_EXTRA_MAX, PATH_MAX_LEN, SOCKADDR_MAX_LEN,
     TLS_DATA_MAX,
 };
 
@@ -58,8 +58,7 @@ pub(crate) static SOCKADDR_BUF: PerCpuArray<[u8; SOCKADDR_MAX_LEN]> =
 /// Per-CPU scratch buffer for capturing extra argv strings (argv[1..]).
 /// Used by the execve / execveat path in sys_exit.
 #[map]
-pub(crate) static ARGV_BUF: PerCpuArray<[u8; ARGV_EXTRA_MAX]> =
-    PerCpuArray::with_max_entries(1, 0);
+pub(crate) static ARGV_BUF: PerCpuArray<[u8; ARGV_EXTRA_MAX]> = PerCpuArray::with_max_entries(1, 0);
 
 // ── uprobe / library-call maps ────────────────────────────────────────────────
 
