@@ -1,14 +1,20 @@
 //! Build script for the snoop binary.
 //!
-//! On Linux: compiles `snoop-ebpf` for `bpfel-unknown-none` using the nightly
-//! toolchain and copies the resulting object to `$OUT_DIR/snoop-ebpf` so that
+//! Resolution order for the embedded eBPF object:
+//!
+//! 1. `SNOOP_SKIP_EBPF_BUILD` is set → write an empty stub (used by CI
+//!    fmt/clippy/test jobs that run on stable without a nightly toolchain).
+//! 2. `SNOOP_EBPF_OBJ` is set → copy that file verbatim into `OUT_DIR`.
+//!    CI build jobs use this after running `cargo xtask build-ebpf` so the
+//!    eBPF object is only compiled once, not again inside this script.
+//! 3. Neither is set → compile `snoop-ebpf` inline via
+//!    `rustup run nightly cargo build …` (local developer workflow when
+//!    invoking `cargo build` directly instead of `cargo xtask run`).
+//!
+//! In all cases the resulting file lives at `$OUT_DIR/snoop-ebpf` so that
 //! `loader.rs` can embed it with `include_bytes_aligned!`.
 //!
-//! On other hosts: no-op so developers on macOS get full IDE support without
-//! needing a BPF toolchain installed.
-//!
-//! In all cases, the short git SHA is embedded as `GIT_SHA` so that
-//! `--version` can display it.
+//! The short git SHA is always embedded as `GIT_SHA` for `--version`.
 
 use std::{path::Path, process::Command};
 
@@ -29,42 +35,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/refs");
 
-    // Only attempt the eBPF build when compiling *for* Linux.
-    // CARGO_CFG_TARGET_OS is set by Cargo to the target OS (not the host OS),
-    // so cross-compilation works correctly too.
+    // eBPF programs only exist on Linux.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return Ok(());
     }
 
     let out_dir = std::env::var("OUT_DIR")?;
-    // The embedded object must be a flat file at this path — loader.rs uses
-    // include_bytes_aligned!(concat!(env!("OUT_DIR"), "/snoop-ebpf")).
+    // loader.rs embeds the object at exactly this path via include_bytes_aligned!
     let out_file = Path::new(&out_dir).join("snoop-ebpf");
 
+    // ── 1. stub mode ──────────────────────────────────────────────────────────
     if std::env::var("SNOOP_SKIP_EBPF_BUILD").is_ok() {
-        // CI check / fmt / clippy jobs run on stable without nightly installed.
-        // Write an empty stub so that loader.rs compiles; the stub is never
-        // loaded at runtime in those jobs.
         std::fs::write(&out_file, b"")?;
         return Ok(());
     }
 
+    // ── 2. pre-built object ───────────────────────────────────────────────────
+    if let Ok(obj_path) = std::env::var("SNOOP_EBPF_OBJ") {
+        println!("cargo:rerun-if-changed={obj_path}");
+        std::fs::copy(&obj_path, &out_file).map_err(|e| {
+            format!("failed to copy SNOOP_EBPF_OBJ ({obj_path}) to {}: {e}", out_file.display())
+        })?;
+        return Ok(());
+    }
+
+    // ── 3. inline build (dev fallback) ────────────────────────────────────────
     println!(
         "cargo:rerun-if-changed={}",
         concat!(env!("CARGO_MANIFEST_DIR"), "/../snoop-ebpf")
     );
 
-    // Use a subdirectory of OUT_DIR as CARGO_TARGET_DIR so aya-build's cargo
-    // invocation does not collide with the flat file we need at OUT_DIR/snoop-ebpf.
+    // Place the eBPF build artifacts in a subdirectory so that they never
+    // collide with the flat file we need at OUT_DIR/snoop-ebpf.
     let ebpf_target_dir = Path::new(&out_dir).join("ebpf-target");
 
+    // CARGO_MANIFEST_DIR is <workspace>/snoop; the workspace root is one level up.
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or("CARGO_MANIFEST_DIR has no parent")?;
 
-    let status = Command::new("cargo")
+    // `cargo +nightly` requires the rustup proxy and is silently ignored when
+    // $CARGO points to a concrete toolchain binary.  `rustup run nightly cargo`
+    // always selects the nightly toolchain regardless of environment.
+    let status = Command::new("rustup")
         .args([
-            "+nightly",
+            "run",
+            "nightly",
+            "cargo",
             "build",
             "--package",
             "snoop-ebpf",
@@ -80,10 +97,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .status()?;
 
     if !status.success() {
-        return Err("cargo +nightly build (snoop-ebpf) failed".into());
+        return Err("rustup run nightly cargo build (snoop-ebpf) failed".into());
     }
 
-    // Copy the compiled ELF object to the flat path expected by loader.rs.
     let compiled = ebpf_target_dir
         .join("bpfel-unknown-none")
         .join("debug")
