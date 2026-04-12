@@ -43,8 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // The stub binary is never loaded at runtime in those jobs.
             std::fs::write(&stub_path, b"")?;
         } else {
-            println!("cargo:rerun-if-changed=../.git/HEAD");
-            println!("cargo:rerun-if-changed=../.git/refs");
             println!(
                 "cargo:rerun-if-changed={}",
                 concat!(env!("CARGO_MANIFEST_DIR"), "/../snoop-ebpf")
